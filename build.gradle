@@ -59,6 +59,17 @@ android {
     }
 }
 
+subprojects {
+    afterEvaluate {
+        if (getPlugins().hasPlugin('android') ||
+                getPlugins().hasPlugin('android-library')) {
+
+            configure(android.lintOptions) {
+                abortOnError false
+            }
+        }
+    }
+}
 
 // In this section you declare where to find the dependencies of your project
 repositories {
