@@ -23,6 +23,8 @@ import android.os.Bundle;
 import android.provider.CalendarContract;
 import android.provider.CalendarContract.Calendars;
 import android.util.Log;
+import at.bitfire.davdroid.resource.ServerInfo;
+import ezvcard.VCardVersion;
 
 public class AccountSettings {
 	private final static String TAG = "davdroid.AccountSettings";
@@ -35,7 +37,8 @@ public class AccountSettings {
 		KEY_AUTH_PREEMPTIVE = "auth_preemptive",
 		
 		KEY_ADDRESSBOOK_URL = "addressbook_url",
-		KEY_ADDRESSBOOK_CTAG = "addressbook_ctag";
+		KEY_ADDRESSBOOK_CTAG = "addressbook_ctag",
+		KEY_ADDRESSBOOK_VCARD_VERSION = "addressbook_vcard_version";
 	
 	Context context;
 	AccountManager accountManager;
@@ -68,6 +71,7 @@ public class AccountSettings {
 		for (ServerInfo.ResourceInfo addressBook : serverInfo.getAddressBooks())
 			if (addressBook.isEnabled()) {
 				bundle.putString(KEY_ADDRESSBOOK_URL, addressBook.getURL());
+				bundle.putString(KEY_ADDRESSBOOK_VCARD_VERSION, addressBook.getVCardVersion().getVersion());
 				continue;
 			}
 		return bundle;
@@ -101,6 +105,14 @@ public class AccountSettings {
 	
 	public void setAddressBookCTag(String cTag) {
 		accountManager.setUserData(account, KEY_ADDRESSBOOK_CTAG, cTag);
+	}
+	
+	public VCardVersion getAddressBookVCardVersion() {
+		VCardVersion version = VCardVersion.V3_0;
+		String versionStr = accountManager.getUserData(account, KEY_ADDRESSBOOK_VCARD_VERSION);
+		if (versionStr != null)
+			version = VCardVersion.valueOfByStr(versionStr);
+		return version;
 	}
 	
 	

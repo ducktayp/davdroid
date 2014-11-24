@@ -10,9 +10,8 @@ package at.bitfire.davdroid.syncadapter;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.LinkedList;
-import java.util.List;
 
+import lombok.Cleanup;
 import android.app.DialogFragment;
 import android.app.LoaderManager.LoaderCallbacks;
 import android.content.AsyncTaskLoader;
@@ -26,18 +25,15 @@ import android.view.ViewGroup;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 import at.bitfire.davdroid.R;
+import at.bitfire.davdroid.resource.DavResourceFinder;
+import at.bitfire.davdroid.resource.ServerInfo;
 import at.bitfire.davdroid.webdav.DavException;
-import at.bitfire.davdroid.webdav.DavHttpClient;
-import at.bitfire.davdroid.webdav.DavIncapableException;
-import at.bitfire.davdroid.webdav.HttpPropfind.Mode;
-import at.bitfire.davdroid.webdav.WebDavResource;
 import ch.boye.httpclientandroidlib.HttpException;
-import ch.boye.httpclientandroidlib.impl.client.CloseableHttpClient;
 
 public class QueryServerDialogFragment extends DialogFragment implements LoaderCallbacks<ServerInfo> {
 	private static final String TAG = "davdroid.QueryServerDialogFragment";
 	public static final String
-		EXTRA_BASE_URL = "base_uri",
+		EXTRA_BASE_URI = "base_uri",
 		EXTRA_USER_NAME = "user_name",
 		EXTRA_PASSWORD = "password",
 		EXTRA_AUTH_PREEMPTIVE = "auth_preemptive";
@@ -105,127 +101,29 @@ public class QueryServerDialogFragment extends DialogFragment implements LoaderC
 		@Override
 		public ServerInfo loadInBackground() {
 			ServerInfo serverInfo = new ServerInfo(
-				args.getString(EXTRA_BASE_URL),
+				URI.create(args.getString(EXTRA_BASE_URI)),
 				args.getString(EXTRA_USER_NAME),
 				args.getString(EXTRA_PASSWORD),
 				args.getBoolean(EXTRA_AUTH_PREEMPTIVE)
 			);
 			
-			// disable compression and enable network logging for debugging purposes 
-			CloseableHttpClient httpClient = DavHttpClient.create(true, true);
-			
 			try {
-				// (1/5) detect capabilities
-				WebDavResource base = new WebDavResource(httpClient, new URI(serverInfo.getProvidedURL()), serverInfo.getUserName(),
-						serverInfo.getPassword(), serverInfo.isAuthPreemptive(), true);
-				base.options();
-				
-				serverInfo.setCardDAV(base.supportsDAV("addressbook"));
-				serverInfo.setCalDAV(base.supportsDAV("calendar-access"));
-				if (!base.supportsMethod("PROPFIND") || !base.supportsMethod("REPORT") ||
-					(!serverInfo.isCalDAV() && !serverInfo.isCardDAV()))
-					throw new DavIncapableException(getContext().getString(R.string.neither_caldav_nor_carddav));
-				
-				// (2/5) get principal URL
-				base.propfind(Mode.CURRENT_USER_PRINCIPAL);
-				
-				String principalPath = base.getCurrentUserPrincipal();
-				if (principalPath != null)
-					Log.i(TAG, "Found principal path: " + principalPath);
-				else
-					throw new DavIncapableException(getContext().getString(R.string.error_principal_path));
-				
-				// (3/5) get home sets
-				WebDavResource principal = new WebDavResource(base, principalPath);
-				principal.propfind(Mode.HOME_SETS);
-				
-				String pathAddressBooks = null;
-				if (serverInfo.isCardDAV()) {
-					pathAddressBooks = principal.getAddressbookHomeSet();
-					if (pathAddressBooks != null)
-						Log.i(TAG, "Found address book home set: " + pathAddressBooks);
-					else
-						throw new DavIncapableException(getContext().getString(R.string.error_home_set_address_books));
-				}
-				
-				String pathCalendars = null;
-				if (serverInfo.isCalDAV()) {
-					pathCalendars = principal.getCalendarHomeSet();
-					if (pathCalendars != null)
-						Log.i(TAG, "Found calendar home set: " + pathCalendars);
-					else
-						throw new DavIncapableException(getContext().getString(R.string.error_home_set_calendars));
-				}
-				
-				// (4/5) get address books
-				if (serverInfo.isCardDAV()) {
-					WebDavResource homeSetAddressBooks = new WebDavResource(principal, pathAddressBooks, true);
-					homeSetAddressBooks.propfind(Mode.MEMBERS_COLLECTIONS);
-					
-					List<ServerInfo.ResourceInfo> addressBooks = new LinkedList<ServerInfo.ResourceInfo>();
-					if (homeSetAddressBooks.getMembers() != null)
-						for (WebDavResource resource : homeSetAddressBooks.getMembers())
-							if (resource.isAddressBook()) {
-								Log.i(TAG, "Found address book: " + resource.getLocation().getRawPath());
-								ServerInfo.ResourceInfo info = new ServerInfo.ResourceInfo(
-									ServerInfo.ResourceInfo.Type.ADDRESS_BOOK,
-									resource.isReadOnly(),
-									resource.getLocation().toASCIIString(),
-									resource.getDisplayName(),
-									resource.getDescription(), resource.getColor()
-								);
-								addressBooks.add(info);
-							}
-					
-					serverInfo.setAddressBooks(addressBooks);
-				}
-
-				// (5/5) get calendars
-				if (serverInfo.isCalDAV()) {
-					WebDavResource homeSetCalendars = new WebDavResource(principal, pathCalendars, true);
-					homeSetCalendars.propfind(Mode.MEMBERS_COLLECTIONS);
-					
-					List<ServerInfo.ResourceInfo> calendars = new LinkedList<ServerInfo.ResourceInfo>();
-					if (homeSetCalendars.getMembers() != null)
-						for (WebDavResource resource : homeSetCalendars.getMembers())
-							if (resource.isCalendar()) {
-								Log.i(TAG, "Found calendar: " + resource.getLocation().getRawPath());
-								if (resource.getSupportedComponents() != null) {
-									// CALDAV:supported-calendar-component-set available
-									boolean supportsEvents = false;
-									for (String supportedComponent : resource.getSupportedComponents())
-										if (supportedComponent.equalsIgnoreCase("VEVENT"))
-											supportsEvents = true;
-									if (!supportsEvents)	// ignore collections without VEVENT support
-										continue;
-								}
-								ServerInfo.ResourceInfo info = new ServerInfo.ResourceInfo(
-									ServerInfo.ResourceInfo.Type.CALENDAR,
-									resource.isReadOnly(),
-									resource.getLocation().toASCIIString(),
-									resource.getDisplayName(),
-									resource.getDescription(), resource.getColor()
-								);
-								info.setTimezone(resource.getTimezone());
-								calendars.add(info);
-							}
-					
-					serverInfo.setCalendars(calendars);
-				}
-				
+				@Cleanup DavResourceFinder finder = new DavResourceFinder(context);
+				finder.findResources(serverInfo);
 			} catch (URISyntaxException e) {
 				serverInfo.setErrorMessage(getContext().getString(R.string.exception_uri_syntax, e.getMessage()));
 			}  catch (IOException e) {
 				serverInfo.setErrorMessage(getContext().getString(R.string.exception_io, e.getLocalizedMessage()));
-			} catch (DavException e) {
-				Log.e(TAG, "DAV error while querying server info", e);
-				serverInfo.setErrorMessage(getContext().getString(R.string.exception_incapable_resource, e.getLocalizedMessage()));
 			} catch (HttpException e) {
 				Log.e(TAG, "HTTP error while querying server info", e);
 				serverInfo.setErrorMessage(getContext().getString(R.string.exception_http, e.getLocalizedMessage()));
+			} catch (DavException e) {
+				Log.e(TAG, "DAV error while querying server info", e);
+				serverInfo.setErrorMessage(getContext().getString(R.string.exception_incapable_resource, e.getLocalizedMessage()));
 			}
 			
 			return serverInfo;
 		}
+		
 	}
 }

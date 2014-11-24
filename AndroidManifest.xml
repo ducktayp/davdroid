@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools"
     package="at.bitfire.davdroid"
-    android:versionCode="37"
-    android:versionName="0.5.14-alpha" android:installLocation="internalOnly">
+    android:versionCode="46"
+    android:versionName="0.6.7.1" android:installLocation="internalOnly">
 
     <uses-sdk
         android:minSdkVersion="14"
-        android:targetSdkVersion="19" />
+        android:targetSdkVersion="20" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
@@ -17,11 +18,12 @@
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
 
     <application
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/AppTheme"
-        android:process=":sync" >
+        android:process=":sync"
+        tools:replace="label">
         <service
             android:name=".syncadapter.AccountAuthenticatorService"
             android:exported="false" >

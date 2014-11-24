@@ -60,7 +60,6 @@ import android.provider.CalendarContract.Events;
 import android.provider.CalendarContract.Reminders;
 import android.provider.ContactsContract;
 import android.util.Log;
-import at.bitfire.davdroid.syncadapter.ServerInfo;
 
 /**
  * Represents a locally stored calendar, containing Events.
@@ -104,12 +103,14 @@ public class LocalCalendar extends LocalCollection<Event> {
 	/* class methods, constructor */
 
 	@SuppressLint("InlinedApi")
-	public static void create(Account account, ContentResolver resolver, ServerInfo.ResourceInfo info) throws RemoteException {
+	public static void create(Account account, ContentResolver resolver, ServerInfo.ResourceInfo info) throws LocalStorageException {
 		ContentProviderClient client = resolver.acquireContentProviderClient(CalendarContract.AUTHORITY);
+		if (client == null)
+			throw new LocalStorageException("No Calendar Provider found (Calendar app disabled?)");
 		
 		int color = 0xFFC3EA6E;		// fallback: "DAVdroid green"
 		if (info.getColor() != null) {
-			Pattern p = Pattern.compile("#(\\p{XDigit}{6})(\\p{XDigit}{2})?");
+			Pattern p = Pattern.compile("#?(\\p{XDigit}{6})(\\p{XDigit}{2})?");
 			Matcher m = p.matcher(info.getColor());
 			if (m.find()) {
 				int color_rgb = Integer.parseInt(m.group(1), 16);
@@ -146,7 +147,11 @@ public class LocalCalendar extends LocalCollection<Event> {
 			values.put(Calendars.CALENDAR_TIME_ZONE, info.getTimezone());
 		
 		Log.i(TAG, "Inserting calendar: " + values.toString() + " -> " + calendarsURI(account).toString());
-		client.insert(calendarsURI(account), values);
+		try {
+			client.insert(calendarsURI(account), values);
+		} catch(RemoteException e) {
+			throw new LocalStorageException(e);
+		}
 	}
 	
 	public static LocalCalendar[] findAll(Account account, ContentProviderClient providerClient) throws RemoteException {

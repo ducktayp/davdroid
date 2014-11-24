@@ -14,9 +14,11 @@
 bin/
 doc/javadoc/
 gen/
+build/
 
 # Local configuration file (sdk path, etc)
 local.properties
+secure.properties
 
 # Eclipse project files
 .classpath
@@ -30,6 +32,9 @@ proguard/
 *.ipr
 *.iws
 .idea/
+
+# private files
+.private
 
 
 ### ECLIPSE
@@ -59,3 +64,4 @@ local.properties
 
 # PDT-specific
 .buildpath
+

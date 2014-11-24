@@ -67,6 +67,8 @@ import at.bitfire.davdroid.syncadapter.DavSyncAdapter;
 public class Event extends Resource {
 	private final static String TAG = "davdroid.Event";
 	
+	public final static String MIME_TYPE = "text/calendar";
+	
 	private final static TimeZoneRegistry tzRegistry = new DefaultTimeZoneRegistryFactory().createRegistry();
 	
 	@Getter @Setter private String summary, location, description;
@@ -201,7 +203,7 @@ public class Event extends Resource {
 	public ByteArrayOutputStream toEntity() throws IOException {
 		net.fortuna.ical4j.model.Calendar ical = new net.fortuna.ical4j.model.Calendar();
 		ical.getProperties().add(Version.VERSION_2_0);
-		ical.getProperties().add(new ProdId("-//bitfire web engineering//DAVdroid " + Constants.APP_VERSION + "//EN"));
+		ical.getProperties().add(new ProdId("-//bitfire web engineering//DAVdroid " + Constants.APP_VERSION + " (ical4j 1.0.x)//EN"));
 		
 		VEvent event = new VEvent();
 		PropertyList props = event.getProperties();
@@ -350,15 +352,17 @@ public class Event extends Resource {
 		date.setTimeZone(tzRegistry.getTimeZone(localTZ));
 	}
 
-	public static String TimezoneDefToTzId(String timezoneDef) {
+	public static String TimezoneDefToTzId(String timezoneDef) throws IllegalArgumentException {
 		try {
-			CalendarBuilder builder = new CalendarBuilder();
-			net.fortuna.ical4j.model.Calendar cal = builder.build(new StringReader(timezoneDef));
-			VTimeZone timezone = (VTimeZone)cal.getComponent(VTimeZone.VTIMEZONE);
-			return timezone.getTimeZoneId().getValue();
+			if (timezoneDef != null) {
+				CalendarBuilder builder = new CalendarBuilder();
+				net.fortuna.ical4j.model.Calendar cal = builder.build(new StringReader(timezoneDef));
+				VTimeZone timezone = (VTimeZone)cal.getComponent(VTimeZone.VTIMEZONE);
+				return timezone.getTimeZoneId().getValue();
+			}
 		} catch (Exception ex) {
 			Log.w(TAG, "Can't understand time zone definition", ex);
 		}
-		return null;
+		throw new IllegalArgumentException();
 	}
 }

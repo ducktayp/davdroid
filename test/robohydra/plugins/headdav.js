@@ -4,7 +4,8 @@ var roboHydra = require("robohydra"),
 
 RoboHydraHeadDAV = roboHydraHeads.roboHydraHeadType({
 	name: 'WebDAV Server',
-	mandatoryProperties: [ 'path', 'handler' ],
+	mandatoryProperties: [ 'path' ],
+    optionalProperties: [ 'handler' ],
 
 	parentPropBuilder: function() {
 		var myHandler = this.handler;
@@ -15,10 +16,16 @@ RoboHydraHeadDAV = roboHydraHeads.roboHydraHeadType({
 				res.headers['DAV'] = 'addressbook, calendar-access';
 				res.statusCode = 500;
 
+                // verify Accept header
+                var accept = req.headers['accept'];
+                if (req.method == "GET" && (accept == undefined || !accept.match(/text\/(calendar|vcard|xml)/)) ||
+                    (req.method == "PROPFIND" || req.method == "REPORT") && (accept == undefined || accept != "text/xml"))
+                    res.statusCode = 406;
+
 				// DAV operations that work on all URLs
-				if (req.method == "OPTIONS") {
+				else if (req.method == "OPTIONS") {
 					res.statusCode = 204;
-					res.headers['Allow'] = 'OPTIONS, PROPFIND, GET, PUT, DELETE';
+					res.headers['Allow'] = 'OPTIONS, PROPFIND, GET, PUT, DELETE, REPORT';
 
 				} else if (req.method == "PROPFIND" && req.rawBody.toString().match(/current-user-principal/)) {
 					res.statusCode = 207;
@@ -38,7 +45,7 @@ RoboHydraHeadDAV = roboHydraHeads.roboHydraHeadType({
 						</multistatus>\
 					');
 					
-				} else
+				} else if (typeof myHandler != 'undefined')
 					myHandler(req,res,next);
 
 				res.end();

@@ -24,7 +24,6 @@ import android.util.Log;
 import at.bitfire.davdroid.Constants;
 import ezvcard.Ezvcard;
 import ezvcard.VCard;
-import ezvcard.VCardException;
 import ezvcard.VCardVersion;
 import ezvcard.ValidationWarnings;
 import ezvcard.parameter.EmailType;
@@ -33,6 +32,7 @@ import ezvcard.parameter.TelephoneType;
 import ezvcard.property.Address;
 import ezvcard.property.Anniversary;
 import ezvcard.property.Birthday;
+import ezvcard.property.Categories;
 import ezvcard.property.Email;
 import ezvcard.property.FormattedName;
 import ezvcard.property.Impp;
@@ -60,6 +60,8 @@ import ezvcard.property.Url;
 @ToString(callSuper = true)
 public class Contact extends Resource {
 	private final static String TAG = "davdroid.Contact";
+	
+	public final static String MIME_TYPE = "text/vcard";
 	
 	public final static String
 		PROPERTY_STARRED = "X-DAVDROID-STARRED",
@@ -97,6 +99,7 @@ public class Contact extends Resource {
 	@Getter private List<Email> emails = new LinkedList<Email>();
 	@Getter private List<Impp> impps = new LinkedList<Impp>();
 	@Getter private List<Address> addresses = new LinkedList<Address>();
+	@Getter private List<String> categories = new LinkedList<String>();
 	@Getter private List<String> URLs = new LinkedList<String>();
 
 
@@ -125,7 +128,7 @@ public class Contact extends Resource {
 	/* VCard methods */
 
 	@Override
-	public void parseEntity(InputStream is) throws IOException, VCardException {
+	public void parseEntity(InputStream is) throws IOException {
 		VCard vcard = Ezvcard.parse(is).first();
 		if (vcard == null)
 			return;
@@ -244,6 +247,12 @@ public class Contact extends Resource {
 		addresses = vcard.getAddresses();
 		vcard.removeProperties(Address.class);
 		
+		// CATEGORY
+		Categories categories = vcard.getCategories();
+		if (categories != null)
+			this.categories = categories.getValues();
+		vcard.removeProperties(Categories.class);
+		
 		// URL
 		for (Url url : vcard.getUrls())
 			URLs.add(url.getValue());
@@ -361,6 +370,10 @@ public class Contact extends Resource {
 		for (Address address : addresses)
 			vcard.addAddress(address);
 		
+		// CATEGORY
+		if (!categories.isEmpty())
+			vcard.setCategories(categories.toArray(new String[0]));
+		
 		// URL
 		for (String url : URLs)
 			vcard.addUrl(url);
@@ -377,7 +390,7 @@ public class Contact extends Resource {
 			vcard.addPhoto(new Photo(photo, ImageType.JPEG));
 		
 		// PRODID, REV
-		vcard.setProdId("DAVdroid/" + Constants.APP_VERSION + " (ez-vcard/" + Ezvcard.VERSION + ")");
+		vcard.setProductId("DAVdroid/" + Constants.APP_VERSION + " (ez-vcard/" + Ezvcard.VERSION + ")");
 		vcard.setRevision(Revision.now());
 		
 		// validate and print warnings

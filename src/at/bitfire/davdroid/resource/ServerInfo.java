@@ -5,12 +5,14 @@
  * which accompanies this distribution, and is available at
  * http://www.gnu.org/licenses/gpl.html
  ******************************************************************************/
-package at.bitfire.davdroid.syncadapter;
+package at.bitfire.davdroid.resource;
 
 import java.io.Serializable;
+import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
 
+import ezvcard.VCardVersion;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -19,16 +21,21 @@ import lombok.RequiredArgsConstructor;
 public class ServerInfo implements Serializable {
 	private static final long serialVersionUID = 6744847358282980437L;
 	
-	final private String providedURL;
+	enum Scheme {
+		HTTP, HTTPS, MAILTO
+	}
+	
+	final private URI baseURI;
 	final private String userName, password;
 	final boolean authPreemptive;
 	
 	private String errorMessage;
 	
-	private boolean calDAV, cardDAV;
+	private boolean calDAV = false, cardDAV = false;
 	private List<ResourceInfo>
 		addressBooks = new LinkedList<ResourceInfo>(),
 		calendars  = new LinkedList<ResourceInfo>();
+	
 	
 	public boolean hasEnabledCalendars() {
 		for (ResourceInfo calendar : calendars)
@@ -43,7 +50,7 @@ public class ServerInfo implements Serializable {
 	public static class ResourceInfo implements Serializable {
 		private static final long serialVersionUID = -5516934508229552112L;
 		
-		enum Type {
+		public enum Type {
 			ADDRESS_BOOK,
 			CALENDAR
 		}
@@ -53,7 +60,9 @@ public class ServerInfo implements Serializable {
 		final Type type;
 		final boolean readOnly;
 		final String URL, title, description, color;
-		
+
+		VCardVersion vCardVersion;
+
 		String timezone;
 	}
 }

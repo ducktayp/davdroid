@@ -32,42 +32,42 @@ import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.TextView;
 import at.bitfire.davdroid.R;
-import at.bitfire.davdroid.URIUtils;
+import at.bitfire.davdroid.URLUtils;
 
-public class EnterCredentialsFragment extends Fragment implements TextWatcher {
-	String protocol;
+public class LoginURLFragment extends Fragment implements TextWatcher {
+	protected String scheme;
 	
-	TextView textHttpWarning;
-	EditText editBaseURL, editUserName, editPassword;
-	CheckBox checkboxPreemptive;
-	Button btnNext;
+	protected TextView textHttpWarning;
+	protected EditText editBaseURI, editUserName, editPassword;
+	protected CheckBox checkboxPreemptive;
+	protected Button btnNext;
 	
 
 	@Override
 	public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
-		View v = inflater.inflate(R.layout.enter_credentials, container, false);
+		View v = inflater.inflate(R.layout.login_url, container, false);
 		
 		// protocol selection spinner
 		textHttpWarning = (TextView) v.findViewById(R.id.http_warning);
 		
-		Spinner spnrProtocol = (Spinner) v.findViewById(R.id.select_protocol);
-		spnrProtocol.setOnItemSelectedListener(new OnItemSelectedListener() {
+		Spinner spnrScheme = (Spinner) v.findViewById(R.id.login_scheme);
+		spnrScheme.setOnItemSelectedListener(new OnItemSelectedListener() {
 			@Override
 			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-				protocol = parent.getAdapter().getItem(position).toString();
-				textHttpWarning.setVisibility(protocol.equals("https://") ? View.GONE : View.VISIBLE);
+				scheme = parent.getAdapter().getItem(position).toString();
+				textHttpWarning.setVisibility(scheme.equals("https://") ? View.GONE : View.VISIBLE);
 			}
 
 			@Override
 			public void onNothingSelected(AdapterView<?> parent) {
-				protocol = null;
+				scheme = null;
 			}
 		});
-		spnrProtocol.setSelection(1);	// HTTPS
+		spnrScheme.setSelection(1);	// HTTPS
 
 		// other input fields
-		editBaseURL = (EditText) v.findViewById(R.id.baseURL);
-		editBaseURL.addTextChangedListener(this);
+		editBaseURI = (EditText) v.findViewById(R.id.login_host_path);
+		editBaseURI.addTextChangedListener(this);
 		
 		editUserName = (EditText) v.findViewById(R.id.userName);
 		editUserName.addTextChangedListener(this);
@@ -85,35 +85,30 @@ public class EnterCredentialsFragment extends Fragment implements TextWatcher {
 
 	@Override
 	public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
-	    inflater.inflate(R.menu.enter_credentials, menu);
+	    inflater.inflate(R.menu.only_next, menu);
 	}
 	
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		switch (item.getItemId()) {
 		case R.id.next:
-			queryServer();
+			FragmentTransaction ft = getFragmentManager().beginTransaction();
+			
+			Bundle args = new Bundle();
+			String host_path = editBaseURI.getText().toString();
+			args.putString(QueryServerDialogFragment.EXTRA_BASE_URI, URLUtils.sanitize(scheme + host_path));
+			args.putString(QueryServerDialogFragment.EXTRA_USER_NAME, editUserName.getText().toString());
+			args.putString(QueryServerDialogFragment.EXTRA_PASSWORD, editPassword.getText().toString());
+			args.putBoolean(QueryServerDialogFragment.EXTRA_AUTH_PREEMPTIVE, checkboxPreemptive.isChecked());
+			
+			DialogFragment dialog = new QueryServerDialogFragment();
+			dialog.setArguments(args);
+		    dialog.show(ft, QueryServerDialogFragment.class.getName());
 			break;
 		default:
 			return false;
 		}
 		return true;
-	}
-
-	void queryServer() {
-		FragmentTransaction ft = getFragmentManager().beginTransaction();
-		
-		Bundle args = new Bundle();
-		
-		String host_path = editBaseURL.getText().toString();
-		args.putString(QueryServerDialogFragment.EXTRA_BASE_URL, URIUtils.sanitize(protocol + host_path));
-		args.putString(QueryServerDialogFragment.EXTRA_USER_NAME, editUserName.getText().toString());
-		args.putString(QueryServerDialogFragment.EXTRA_PASSWORD, editPassword.getText().toString());
-		args.putBoolean(QueryServerDialogFragment.EXTRA_AUTH_PREEMPTIVE, checkboxPreemptive.isChecked());
-		
-		DialogFragment dialog = new QueryServerDialogFragment();
-		dialog.setArguments(args);
-	    dialog.show(ft, QueryServerDialogFragment.class.getName());
 	}
 
 	
@@ -125,14 +120,15 @@ public class EnterCredentialsFragment extends Fragment implements TextWatcher {
 			editUserName.getText().length() > 0 &&
 			editPassword.getText().length() > 0;
 
-		// check host name
-		try {
-			URI uri = new URI(URIUtils.sanitize(protocol + editBaseURL.getText().toString()));
-			if (StringUtils.isBlank(uri.getHost()))
+		if (ok)
+			// check host name
+			try {
+				URI uri = new URI(URLUtils.sanitize(scheme + editBaseURI.getText().toString()));
+				if (StringUtils.isBlank(uri.getHost()))
+					ok = false;
+			} catch (URISyntaxException e) {
 				ok = false;
-		} catch (URISyntaxException e) {
-			ok = false;
-		}
+			}
 			
 		MenuItem item = menu.findItem(R.id.next);
 		item.setEnabled(ok);
