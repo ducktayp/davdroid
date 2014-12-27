@@ -15,3 +15,4 @@ include 'services:webservice'
 
 rootProject.name = 'davdroid'
 include 'libs:MemorizingTrustManager'
+include ':app'
