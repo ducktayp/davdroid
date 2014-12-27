@@ -39,7 +39,7 @@ import de.duenndns.ssl.*;
 public class TlsSniSocketFactory implements LayeredConnectionSocketFactory {
 	private static final String TAG = "davdroid.SNISocketFactory";
 	
-	final static TlsSniSocketFactory INSTANCE = new TlsSniSocketFactory();
+	public final static TlsSniSocketFactory INSTANCE = new TlsSniSocketFactory();
 	
 	private final static SSLCertificateSocketFactory sslSocketFactory =
 			(SSLCertificateSocketFactory)SSLCertificateSocketFactory.getDefault(0);
