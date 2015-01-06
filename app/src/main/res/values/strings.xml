@@ -7,10 +7,12 @@
     <string name="davdroid_website">DAVdroid Web site</string>
     <string name="next">Next</string>
     <string name="help">Help</string>
-    
+
+    <string name="exception_cert_path_validation">Untrusted certificate in certificate path. See FAQ for more info.</string>
     <string name="exception_http">HTTP error: %s</string>
     <string name="exception_incapable_resource">Missing capabilities: %s</string>
     <string name="exception_io">I/O error: %s</string>
+    <string name="exception_peer_unverified">Certificate not issued for \"%s\"</string>
     <string name="exception_uri_syntax">Invalid URI: %s</string>
     
     <!-- MainActivity -->
@@ -125,5 +127,7 @@
     <string name="setup_organizer_hint">"ORGANIZER of your events; required if you use attendee info"</string>
     <string name="setup_account_name_info">"Use your email address as account name because Android will use the account name as ORGANIZER field for events you create. You can't have two accounts with the same name.</string>
     <string name="setup_read_only">read-only</string>
+
+    <string name="sync_error_title">Synchronization failed</string>
 
 </resources>

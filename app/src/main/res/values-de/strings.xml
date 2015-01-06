@@ -5,10 +5,12 @@
     <string name="davdroid_website">DAVdroid-Website</string>
     <string name="next">Weiter</string>
     <string name="help">Hilfe</string>
-    
+
+    <string name="exception_cert_path_validation">Nicht vertrauenswürdiges Zertifikat in der Zertifikatskette (siehe FAQ)</string>
     <string name="exception_http">HTTP-Fehler: %s</string>
     <string name="exception_incapable_resource">Fehlende Server-Unterstützung: %s</string>
     <string name="exception_io">E/A-Fehler: %s</string>
+    <string name="exception_peer_unverified">Zertifikat ist nicht für \"%s\" ausgestellt</string>
     <string name="exception_uri_syntax">URI ungültig: %s</string>
     
     <!-- MainActivity -->    
@@ -121,5 +123,7 @@
     <string name="setup_organizer_hint">"ORGANIZER der von Ihnen angelegten Termine; notwendig für Teilnehmer-Info"</string>
     <string name="setup_account_name_info">&quot;Verwenden Sie Ihre Email-Adresse als Kontoname, da Android den Kontonamen als ORGANIZER-Feld in Terminen benutzt. Sie können keine zwei Konten mit dem gleichen Namen anlegen.</string>
     <string name="setup_read_only">schreibgeschützt</string>
+
+    <string name="sync_error_title">Synchronisierung fehlgeschlagen</string>
 
 </resources>
