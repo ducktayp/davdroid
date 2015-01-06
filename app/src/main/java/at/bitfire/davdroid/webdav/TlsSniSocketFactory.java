@@ -16,6 +16,7 @@ import android.util.Log;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.conn.socket.LayeredConnectionSocketFactory;
+import org.apache.http.conn.ssl.BrowserCompatHostnameVerifierHC4;
 import org.apache.http.protocol.HttpContext;
 
 import java.io.IOException;
@@ -37,7 +38,7 @@ import javax.net.ssl.SSLSocketFactory;
 import de.duenndns.ssl.*;
 
 public class TlsSniSocketFactory implements LayeredConnectionSocketFactory {
-	private static final String TAG = "davdroid.SNISocketFactory";
+	private static final String TAG = "davdroid.TlsSniSocketFactory";
 	
 	public final static TlsSniSocketFactory INSTANCE = new TlsSniSocketFactory();
 
@@ -45,7 +46,9 @@ public class TlsSniSocketFactory implements LayeredConnectionSocketFactory {
 	private final static SSLCertificateSocketFactory sslSocketFactory =
 			(SSLCertificateSocketFactory)SSLCertificateSocketFactory.getDefault(0);
 
-	private final static HostnameVerifier hostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier();
+
+	// use BrowserCompatHostnameVerifier to allow IP addresses in the Common Name
+	private final static HostnameVerifier hostnameVerifier = new BrowserCompatHostnameVerifierHC4();
 	// Android context used to show the self-signed certificate dialog.
 	static Context androidContext;
 	
