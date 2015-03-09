@@ -1,10 +1,10 @@
-/*******************************************************************************
- * Copyright (c) 2014 Ricki Hirner (bitfire web engineering).
+/*
+ * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
  * http://www.gnu.org/licenses/gpl.html
- ******************************************************************************/
+ */
 package at.bitfire.davdroid;
 
 import android.app.Activity;
@@ -22,6 +22,7 @@ import android.widget.TextView;
 
 import at.bitfire.davdroid.syncadapter.AddAccountActivity;
 import at.bitfire.davdroid.webdav.TlsSniSocketFactory;
+import at.bitfire.davdroid.syncadapter.SettingsActivity;
 
 public class MainActivity extends Activity {
 
@@ -53,8 +54,11 @@ public class MainActivity extends Activity {
 
 	
 	public void addAccount(MenuItem item) {
-		Intent intent = new Intent(this, AddAccountActivity.class);
-		startActivity(intent);
+		startActivity(new Intent(this, AddAccountActivity.class));
+	}
+
+	public void showSettings(MenuItem item) {
+		startActivity(new Intent(this, SettingsActivity.class));
 	}
 	
 	public void showSyncSettings(MenuItem item) {
