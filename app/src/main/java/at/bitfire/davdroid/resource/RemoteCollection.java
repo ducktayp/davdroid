@@ -7,12 +7,12 @@
  */
 package at.bitfire.davdroid.resource;
 
+import android.accounts.Account;
 import android.util.Log;
 
 import net.fortuna.ical4j.model.ValidationException;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.http.client.utils.URIUtilsHC4;
 import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.ByteArrayInputStream;
@@ -21,11 +21,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 import java.util.LinkedList;
 import java.util.List;
 
 import at.bitfire.davdroid.URIUtils;
+import at.bitfire.davdroid.syncadapter.AccountSettings;
 import at.bitfire.davdroid.webdav.DavException;
 import at.bitfire.davdroid.webdav.DavMultiget;
 import at.bitfire.davdroid.webdav.DavNoContentException;
@@ -44,14 +44,13 @@ import lombok.Getter;
  * @param <T> Subtype of Resource that can be stored in the collection
  */
 public abstract class RemoteCollection<T extends Resource> {
-	private static final String TAG = "davdroid.RemoteCollection";
+	private static final String TAG = "davdroid.resource";
 
 	CloseableHttpClient httpClient;
 	URI baseURI;
 	@Getter	WebDavResource collection;
 
-	abstract protected String memberContentType();
-
+	abstract protected String memberAcceptedMimeTypes();
 	abstract protected DavMultiget.Type multiGetType();
 
 	abstract protected T newResourceSkeleton(String name, String ETag);
@@ -80,10 +79,10 @@ public abstract class RemoteCollection<T extends Resource> {
 		collection.propfind(HttpPropfind.Mode.MEMBERS_ETAG);
 
 		List<T> resources = new LinkedList<T>();
-		if (collection.getMembers() != null) {
+		if (collection.getMembers() != null)
 			for (WebDavResource member : collection.getMembers())
 				resources.add(newResourceSkeleton(member.getName(), member.getETag()));
-		}
+
 		return resources.toArray(new Resource[0]);
 	}
 
@@ -132,14 +131,7 @@ public abstract class RemoteCollection<T extends Resource> {
 	public Resource get(Resource resource) throws URISyntaxException, IOException, HttpException, DavException, InvalidResourceException {
 		WebDavResource member = new WebDavResource(collection, resource.getName());
 
-		if (resource instanceof Contact)
-			member.get(Contact.MIME_TYPE);
-		else if (resource instanceof Event)
-			member.get(Event.MIME_TYPE);
-		else {
-			Log.wtf(TAG, "Should fetch something, but neither contact nor calendar");
-			throw new InvalidResourceException("Didn't now which MIME type to accept");
-		}
+		member.get(memberAcceptedMimeTypes());
 
 		byte[] data = member.getContent();
 		if (data == null)
@@ -157,7 +149,7 @@ public abstract class RemoteCollection<T extends Resource> {
 	// returns ETag of the created resource, if returned by server
 	public String add(Resource res) throws URISyntaxException, IOException, HttpException, ValidationException {
 		WebDavResource member = new WebDavResource(collection, res.getName(), res.getETag());
-		member.setContentType(memberContentType());
+		member.setContentType(res.getMimeType());
 
 		@Cleanup ByteArrayOutputStream os = res.toEntity();
 		String eTag = member.put(os.toByteArray(), PutMode.ADD_DONT_OVERWRITE);
@@ -178,7 +170,7 @@ public abstract class RemoteCollection<T extends Resource> {
 	// returns ETag of the updated resource, if returned by server
 	public String update(Resource res) throws URISyntaxException, IOException, HttpException, ValidationException {
 		WebDavResource member = new WebDavResource(collection, res.getName(), res.getETag());
-		member.setContentType(memberContentType());
+		member.setContentType(res.getMimeType());
 
 		@Cleanup ByteArrayOutputStream os = res.toEntity();
 		String eTag = member.put(os.toByteArray(), PutMode.UPDATE_DONT_OVERWRITE);

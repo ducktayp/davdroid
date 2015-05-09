@@ -32,7 +32,7 @@ import lombok.Cleanup;
  * @param <T> Subtype of Resource that can be stored in the collection 
  */
 public abstract class LocalCollection<T extends Resource> {
-	private static final String TAG = "davdroid.LocalCollection";
+	private static final String TAG = "davdroid.Collection";
 	
 	protected Account account;
 	protected ContentProviderClient providerClient;
@@ -66,6 +66,9 @@ public abstract class LocalCollection<T extends Resource> {
 	
 	/** column name of an entry's UID */
 	abstract protected String entryColumnUID();
+
+	/** SQL filter expression */
+	String sqlFilter;
 	
 
 	LocalCollection(Account account, ContentProviderClient providerClient) {
@@ -89,6 +92,7 @@ public abstract class LocalCollection<T extends Resource> {
 	/**
 	 * Finds new resources (resources which haven't been uploaded yet).
 	 * New resources are 1) dirty, and 2) don't have an ETag yet.
+	 * Only records matching sqlFilter will be returned.
 	 * 
 	 * @return IDs of new resources
 	 * @throws LocalStorageException when the content provider couldn't be queried
@@ -97,6 +101,8 @@ public abstract class LocalCollection<T extends Resource> {
 		String where = entryColumnDirty() + "=1 AND " + entryColumnETag() + " IS NULL";
 		if (entryColumnParentID() != null)
 			where += " AND " + entryColumnParentID() + "=" + String.valueOf(getId());
+		if (sqlFilter != null)
+			where += " AND (" + sqlFilter + ")";
 		try {
 			@Cleanup Cursor cursor = providerClient.query(entriesURI(),
 					new String[] { entryColumnID() },
@@ -127,7 +133,8 @@ public abstract class LocalCollection<T extends Resource> {
 	
 	/**
 	 * Finds updated resources (resources which have already been uploaded, but have changed locally).
-	 * Updated resources are 1) dirty, and 2) already have an ETag.
+	 * Updated resources are 1) dirty, and 2) already have an ETag. Only records matching sqlFilter
+	 * will be returned.
 	 * 
 	 * @return IDs of updated resources
 	 * @throws LocalStorageException when the content provider couldn't be queried
@@ -136,6 +143,8 @@ public abstract class LocalCollection<T extends Resource> {
 		String where = entryColumnDirty() + "=1 AND " + entryColumnETag() + " IS NOT NULL";
 		if (entryColumnParentID() != null)
 			where += " AND " + entryColumnParentID() + "=" + String.valueOf(getId());
+		if (sqlFilter != null)
+			where += " AND (" + sqlFilter + ")";
 		try {
 			@Cleanup Cursor cursor = providerClient.query(entriesURI(),
 					new String[] { entryColumnID(), entryColumnRemoteName(), entryColumnETag() },
@@ -155,6 +164,7 @@ public abstract class LocalCollection<T extends Resource> {
 	/**
 	 * Finds deleted resources (resources which have been marked for deletion).
 	 * Deleted resources have the "deleted" flag set.
+	 * Only records matching sqlFilter will be returned.
 	 * 
 	 * @return IDs of deleted resources
 	 * @throws LocalStorageException when the content provider couldn't be queried
@@ -163,6 +173,8 @@ public abstract class LocalCollection<T extends Resource> {
 		String where = entryColumnDeleted() + "=1";
 		if (entryColumnParentID() != null)
 			where += " AND " + entryColumnParentID() + "=" + String.valueOf(getId());
+		if (sqlFilter != null)
+			where += " AND (" + sqlFilter + ")";
 		try {
 			@Cleanup Cursor cursor = providerClient.query(entriesURI(),
 					new String[] { entryColumnID(), entryColumnRemoteName(), entryColumnETag() },
@@ -180,7 +192,7 @@ public abstract class LocalCollection<T extends Resource> {
 	}
 	
 	/**
-	 * Finds a specific resource by ID.
+	 * Finds a specific resource by ID. Only records matching sqlFilter are taken into account.
 	 * @param localID	ID of the resource
 	 * @param populate	true: populates all data fields (for instance, contact or event details);
 	 * 					false: only remote file name and ETag are populated
@@ -191,7 +203,7 @@ public abstract class LocalCollection<T extends Resource> {
 	public T findById(long localID, boolean populate) throws LocalStorageException {
 		try {
 			@Cleanup Cursor cursor = providerClient.query(ContentUris.withAppendedId(entriesURI(), localID),
-					new String[] { entryColumnRemoteName(), entryColumnETag() }, null, null, null);
+					new String[] { entryColumnRemoteName(), entryColumnETag() }, sqlFilter, null, null);
 			if (cursor != null && cursor.moveToNext()) {
 				T resource = newResource(localID, cursor.getString(0), cursor.getString(1));
 				if (populate)
@@ -205,7 +217,7 @@ public abstract class LocalCollection<T extends Resource> {
 	}
 	
 	/**
-	 * Finds a specific resource by remote file name.
+	 * Finds a specific resource by remote file name. Only records matching sqlFilter are taken into account.
 	 * @param localID	remote file name of the resource
 	 * @param populate	true: populates all data fields (for instance, contact or event details);
 	 * 					false: only remote file name and ETag are populated
@@ -214,10 +226,13 @@ public abstract class LocalCollection<T extends Resource> {
 	 * @throws LocalStorageException when the content provider couldn't be queried
 	 */
 	public T findByRemoteName(String remoteName, boolean populate) throws LocalStorageException {
+		String where = entryColumnRemoteName() + "=?";
+		if (sqlFilter != null)
+			where += " AND (" + sqlFilter + ")";
 		try {
 			@Cleanup Cursor cursor = providerClient.query(entriesURI(),
 					new String[] { entryColumnID(), entryColumnRemoteName(), entryColumnETag() },
-					entryColumnRemoteName() + "=?", new String[] { remoteName }, null);
+					where, new String[] { remoteName }, null);
 			if (cursor != null && cursor.moveToNext()) {
 				T resource = newResource(cursor.getLong(0), cursor.getString(1), cursor.getString(2));
 				if (populate)
@@ -285,7 +300,7 @@ public abstract class LocalCollection<T extends Resource> {
 	
 	/** Updates the locally-known ETag of a resource. */
 	public void updateETag(Resource res, String eTag) throws LocalStorageException {
-		Log.d(TAG, "Setting ETag of local resource " + res + " to " + eTag);
+		Log.d(TAG, "Setting ETag of local resource " + res.getName() + " to " + eTag);
 		
 		ContentValues values = new ContentValues(1);
 		values.put(entryColumnETag(), eTag);
@@ -335,7 +350,7 @@ public abstract class LocalCollection<T extends Resource> {
 				.build();
 	}
 	
-	protected Builder newDataInsertBuilder(Uri dataUri, String refFieldName, long raw_ref_id, Integer backrefIdx) {
+	protected Builder newDataInsertBuilder(Uri dataUri, String refFieldName, long raw_ref_id, int backrefIdx) {
 		Builder builder = ContentProviderOperation.newInsert(syncAdapterURI(dataUri));
 		if (backrefIdx != -1)
 			return builder.withValueBackReference(refFieldName, backrefIdx);

@@ -7,16 +7,16 @@
  */
 package at.bitfire.davdroid.resource;
 
+import android.content.res.AssetManager;
+import android.test.InstrumentationTestCase;
+import android.text.format.Time;
+
+import net.fortuna.ical4j.data.ParserException;
+
 import java.io.IOException;
 import java.io.InputStream;
 
 import lombok.Cleanup;
-import net.fortuna.ical4j.data.ParserException;
-import android.content.res.AssetManager;
-import android.test.InstrumentationTestCase;
-import android.text.format.Time;
-import at.bitfire.davdroid.resource.Event;
-import at.bitfire.davdroid.resource.InvalidResourceException;
 
 public class EventTest extends InstrumentationTestCase {
 	AssetManager assetMgr;
@@ -30,10 +30,18 @@ public class EventTest extends InstrumentationTestCase {
 		eAllDay1Day = parseCalendar("all-day-1day.ics");
 		eAllDay10Days = parseCalendar("all-day-10days.ics");
 		eAllDay0Sec = parseCalendar("all-day-0sec.ics");
-		
-		//assertEquals("Test-Ereignis im schönen Wien", e.getSummary());
 	}
-	
+
+
+	public void testRecurringWithException() throws Exception {
+		Event event = parseCalendar("recurring-with-exception1.ics");
+		assertTrue(event.isAllDay());
+
+		assertEquals(1, event.getExceptions().size());
+		Event exception = event.getExceptions().get(0);
+		assertEquals("20150503", exception.getRecurrenceId().getValue());
+		assertEquals("Another summary for the third day", exception.getSummary());
+	}
 	
 	public void testStartEndTimes() throws IOException, ParserException, InvalidResourceException {
 		// event with start+end date-time

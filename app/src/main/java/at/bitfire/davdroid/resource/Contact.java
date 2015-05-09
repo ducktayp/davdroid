@@ -9,6 +9,8 @@ package at.bitfire.davdroid.resource;
 
 import android.util.Log;
 
+import net.fortuna.ical4j.model.property.ProdId;
+
 import org.apache.commons.lang.StringUtils;
 
 import java.io.ByteArrayOutputStream;
@@ -16,8 +18,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import at.bitfire.davdroid.Constants;
@@ -25,8 +30,10 @@ import ezvcard.Ezvcard;
 import ezvcard.VCard;
 import ezvcard.VCardVersion;
 import ezvcard.ValidationWarnings;
+import ezvcard.Warning;
 import ezvcard.parameter.EmailType;
 import ezvcard.parameter.ImageType;
+import ezvcard.parameter.RelatedType;
 import ezvcard.parameter.TelephoneType;
 import ezvcard.property.Address;
 import ezvcard.property.Anniversary;
@@ -40,7 +47,9 @@ import ezvcard.property.Nickname;
 import ezvcard.property.Note;
 import ezvcard.property.Organization;
 import ezvcard.property.Photo;
+import ezvcard.property.ProductId;
 import ezvcard.property.RawProperty;
+import ezvcard.property.Related;
 import ezvcard.property.Revision;
 import ezvcard.property.Role;
 import ezvcard.property.Sound;
@@ -50,6 +59,8 @@ import ezvcard.property.Telephone;
 import ezvcard.property.Title;
 import ezvcard.property.Uid;
 import ezvcard.property.Url;
+import ezvcard.property.VCardProperty;
+import ezvcard.util.ListMultimap;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
@@ -62,9 +73,9 @@ import lombok.ToString;
 @ToString(callSuper = true)
 public class Contact extends Resource {
 	private final static String TAG = "davdroid.Contact";
-	
-	public final static String MIME_TYPE = "text/vcard";
-	
+
+	@Getter @Setter protected VCardVersion vCardVersion = VCardVersion.V3_0;
+
 	public final static String
 		PROPERTY_STARRED = "X-DAVDROID-STARRED",
 		PROPERTY_PHONETIC_FIRST_NAME = "X-PHONETIC-FIRST-NAME",
@@ -72,14 +83,21 @@ public class Contact extends Resource {
 		PROPERTY_PHONETIC_LAST_NAME = "X-PHONETIC-LAST-NAME",
 		PROPERTY_SIP = "X-SIP";
 		
-	public final static EmailType EMAIL_TYPE_MOBILE = EmailType.get("X-MOBILE");
+	public final static EmailType EMAIL_TYPE_MOBILE = EmailType.get("x-mobile");
 
 	public final static TelephoneType
-		PHONE_TYPE_CALLBACK = TelephoneType.get("X-CALLBACK"),
-		PHONE_TYPE_COMPANY_MAIN = TelephoneType.get("X-COMPANY_MAIN"),
-		PHONE_TYPE_RADIO = TelephoneType.get("X-RADIO"),
-		PHONE_TYPE_ASSISTANT = TelephoneType.get("X-ASSISTANT"),
-		PHONE_TYPE_MMS = TelephoneType.get("X-MMS");
+		PHONE_TYPE_CALLBACK = TelephoneType.get("x-callback"),
+		PHONE_TYPE_COMPANY_MAIN = TelephoneType.get("x-company_main"),
+		PHONE_TYPE_RADIO = TelephoneType.get("x-radio"),
+		PHONE_TYPE_ASSISTANT = TelephoneType.get("X-assistant"),
+		PHONE_TYPE_MMS = TelephoneType.get("x-mms");
+	public final static RelatedType
+		RELATED_TYPE_BROTHER = RelatedType.get("brother"),
+		RELATED_TYPE_FATHER = RelatedType.get("father"),
+		RELATED_TYPE_MANAGER = RelatedType.get("manager"),
+		RELATED_TYPE_MOTHER = RelatedType.get("mother"),
+		RELATED_TYPE_REFERRED_BY = RelatedType.get("referred-by"),
+		RELATED_TYPE_SISTER = RelatedType.get("sister");
 	
 	@Getter @Setter private String unknownProperties;
 	
@@ -97,21 +115,21 @@ public class Contact extends Resource {
 	@Getter @Setter private Anniversary anniversary;
 	@Getter @Setter private Birthday birthDay;
 
-	@Getter private List<Telephone> phoneNumbers = new LinkedList<Telephone>();
-	@Getter private List<Email> emails = new LinkedList<Email>();
-	@Getter private List<Impp> impps = new LinkedList<Impp>();
-	@Getter private List<Address> addresses = new LinkedList<Address>();
-	@Getter private List<String> categories = new LinkedList<String>();
-	@Getter private List<String> URLs = new LinkedList<String>();
-
+	@Getter private List<Telephone> phoneNumbers = new LinkedList<>();
+	@Getter private List<Email> emails = new LinkedList<>();
+	@Getter private List<Impp> impps = new LinkedList<>();
+	@Getter private List<Address> addresses = new LinkedList<>();
+	@Getter private List<String> categories = new LinkedList<>();
+	@Getter private List<String> URLs = new LinkedList<>();
+	@Getter private List<Related> relations = new LinkedList<>();
 
 	/* instance methods */
 	
-	public Contact(String name, String ETag) {
+	Contact(String name, String ETag) {
 		super(name, ETag);
 	}
 	
-	public Contact(long localID, String resourceName, String eTag) {
+	Contact(long localID, String resourceName, String eTag) {
 		super(localID, resourceName, eTag);
 	}
 	
@@ -275,7 +293,17 @@ public class Contact extends Resource {
 		// ANNIVERSARY
 		anniversary = vcard.getAnniversary();
 		vcard.removeProperties(Anniversary.class);
-		
+
+		// RELATED
+		for (Related related : vcard.getRelations()) {
+			String text = related.getText();
+			if (!StringUtils.isNotEmpty(text)) {
+				// process only free-form relations with text
+				relations.add(related);
+				vcard.removeProperty(related);
+			}
+		}
+
 		// X-SIP
 		for (RawProperty sip : vcard.getExtendedProperties(PROPERTY_SIP))
 			impps.add(new Impp("sip", sip.getValue()));
@@ -285,6 +313,7 @@ public class Contact extends Resource {
 		vcard.removeProperties(Logo.class);
 		vcard.removeProperties(Sound.class);
 		// remove properties that don't apply anymore
+		vcard.removeProperties(ProductId.class);
 		vcard.removeProperties(Revision.class);
 		vcard.removeProperties(Source.class);
 		// store all remaining properties into unknownProperties
@@ -296,6 +325,14 @@ public class Contact extends Resource {
 			}
 	}
 
+
+	@Override
+	public String getMimeType() {
+		if (vCardVersion == VCardVersion.V4_0)
+			return "text/vcard;version=4.0";
+		else
+			return "text/vcard";
+	}
 	
 	@Override
 	public ByteArrayOutputStream toEntity() throws IOException {
@@ -308,7 +345,7 @@ public class Contact extends Resource {
 		}
 		if (vcard == null)
 			vcard = new VCard();
-		
+
 		if (uid != null)
 			vcard.setUid(new Uid(uid));
 		else
@@ -325,7 +362,7 @@ public class Contact extends Resource {
 			Log.w(TAG, "No FN (formatted name) available to generate VCard");
 
 		// N
-		if (familyName != null || middleName != null || givenName != null) {
+		if (prefix != null || familyName != null || middleName != null || givenName != null || suffix != null) {
 			StructuredName n = new StructuredName();
 			if (prefix != null)
 				for (String p : StringUtils.split(prefix))
@@ -399,20 +436,24 @@ public class Contact extends Resource {
 		// PHOTO
 		if (photo != null)
 			vcard.addPhoto(new Photo(photo, ImageType.JPEG));
-		
+
+		// REL
+		for (Related related : relations)
+			vcard.addRelated(related);
+
 		// PRODID, REV
 		vcard.setProductId("DAVdroid/" + Constants.APP_VERSION + " (ez-vcard/" + Ezvcard.VERSION + ")");
 		vcard.setRevision(Revision.now());
 		
 		// validate and print warnings
-		ValidationWarnings warnings = vcard.validate(VCardVersion.V3_0);
+		ValidationWarnings warnings = vcard.validate(vCardVersion);
 		if (!warnings.isEmpty())
-			Log.w(TAG, "Created potentially invalid VCard! " + warnings);
-		
+			Log.w(TAG, "Created potentially invalid VCard:\n" + warnings);
+
 		ByteArrayOutputStream os = new ByteArrayOutputStream();
 		Ezvcard
 			.write(vcard)
-			.version(VCardVersion.V3_0)
+			.version(vCardVersion)
 			.versionStrict(false)
 			.prodId(false)		// we provide our own PRODID
 			.go(os);

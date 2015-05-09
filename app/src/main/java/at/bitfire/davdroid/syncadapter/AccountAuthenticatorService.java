@@ -19,6 +19,8 @@ import android.os.Bundle;
 import android.os.IBinder;
 import at.bitfire.davdroid.webdav.TlsSniSocketFactory;
 
+import at.bitfire.davdroid.ui.setup.AddAccountActivity;
+
 public class AccountAuthenticatorService extends Service {
 	private static AccountAuthenticator accountAuthenticator;
 

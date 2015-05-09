@@ -195,9 +195,20 @@ public class WebDavResourceTest extends InstrumentationTestCase {
 		// contact file names should be unescaped (yes, it's really named ...%40pc... to check double-encoding)
 		assertEquals("1.vcf", davAddressBook.getMembers().get(0).getName());
 		assertEquals("2:3@my%40pc.vcf", davAddressBook.getMembers().get(1).getName());
-		// both contacts have content
+		// all contacts have some content
 		for (WebDavResource member : davAddressBook.getMembers())
 			assertNotNull(member.getContent());
+	}
+
+	public void testMultiGetWith404() throws Exception {
+		WebDavResource davAddressBook = new WebDavResource(davCollection, "addressbooks/default-with-404.vcf/");
+		try {
+			davAddressBook.multiGet(DavMultiget.Type.ADDRESS_BOOK, new String[]{ "notexisting" });
+			fail();
+		} catch(NotFoundException e) {
+			// addressbooks/default.vcf/notexisting doesn't exist,
+			// so server responds with 404 which causes a NotFoundException
+		}
 	}
 	
 	public void testPutAddDontOverwrite() throws Exception {

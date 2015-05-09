@@ -41,6 +41,7 @@ import net.fortuna.ical4j.model.property.Organizer;
 import net.fortuna.ical4j.model.property.ProdId;
 import net.fortuna.ical4j.model.property.RDate;
 import net.fortuna.ical4j.model.property.RRule;
+import net.fortuna.ical4j.model.property.RecurrenceId;
 import net.fortuna.ical4j.model.property.Status;
 import net.fortuna.ical4j.model.property.Summary;
 import net.fortuna.ical4j.model.property.Transp;
@@ -50,17 +51,22 @@ import net.fortuna.ical4j.util.CompatibilityHints;
 import net.fortuna.ical4j.util.SimpleHostInfo;
 import net.fortuna.ical4j.util.UidGenerator;
 
+import org.apache.commons.lang.StringUtils;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.SimpleTimeZone;
 import java.util.TimeZone;
 
 import at.bitfire.davdroid.Constants;
+import at.bitfire.davdroid.DateUtils;
 import at.bitfire.davdroid.syncadapter.DavSyncAdapter;
 import lombok.Getter;
 import lombok.NonNull;
@@ -70,35 +76,30 @@ import lombok.Setter;
 public class Event extends Resource {
 	private final static String TAG = "davdroid.Event";
 	
-	public final static String MIME_TYPE = "text/calendar";
-	
 	private final static TimeZoneRegistry tzRegistry = new DefaultTimeZoneRegistryFactory().createRegistry();
+
+	@Getter @Setter protected RecurrenceId recurrenceId;
+
+	@Getter @Setter protected String summary, location, description;
 	
-	@Getter @Setter private String summary, location, description;
+	@Getter protected DtStart dtStart;
+	@Getter protected DtEnd dtEnd;
+	@Getter @Setter protected Duration duration;
+	@Getter @Setter protected RDate rdate;
+	@Getter @Setter protected RRule rrule;
+	@Getter @Setter protected ExDate exdate;
+	@Getter @Setter protected ExRule exrule;
+	@Getter protected List<Event> exceptions = new LinkedList<>();
+
+	@Getter @Setter protected Boolean forPublic;
+	@Getter @Setter protected Status status;
 	
-	@Getter private DtStart dtStart;
-	@Getter private DtEnd dtEnd;
-	@Getter @Setter private Duration duration;
-	@Getter @Setter private RDate rdate;
-	@Getter @Setter private RRule rrule;
-	@Getter @Setter private ExDate exdate;
-	@Getter @Setter private ExRule exrule;
+	@Getter @Setter protected boolean opaque;
 	
-	@Getter @Setter private Boolean forPublic;
-	@Getter @Setter private Status status;
-	
-	@Getter @Setter private boolean opaque;	
-	
-	@Getter @Setter private Organizer organizer;
-	@Getter private List<Attendee> attendees = new LinkedList<Attendee>();
-	public void addAttendee(Attendee attendee) {
-		attendees.add(attendee);
-	}
-	
-	@Getter private List<VAlarm> alarms = new LinkedList<VAlarm>();
-	public void addAlarm(VAlarm alarm) {
-		alarms.add(alarm);
-	}
+	@Getter @Setter protected Organizer organizer;
+	@Getter protected List<Attendee> attendees = new LinkedList<Attendee>();
+
+	@Getter protected List<VAlarm> alarms = new LinkedList<VAlarm>();
 
 	static {
 		CompatibilityHints.setHintEnabled(CompatibilityHints.KEY_RELAXED_UNFOLDING, true);
@@ -145,19 +146,44 @@ public class Event extends Resource {
 			throw new InvalidResourceException(e);
 		}
 		
-		// event
 		ComponentList events = ical.getComponents(Component.VEVENT);
 		if (events == null || events.isEmpty())
 			throw new InvalidResourceException("No VEVENT found");
-		VEvent event = (VEvent)events.get(0);
-		
+
+		// find master VEVENT (the one that is not an exception, i.e. the one without RECURRENCE-ID)
+		VEvent master = null;
+		for (Object objEvent : events) {
+			VEvent event = (VEvent)objEvent;
+			if (event.getRecurrenceId() == null) {
+				master = event;
+				break;
+			}
+		}
+		if (master == null)
+			throw new InvalidResourceException("No VEVENT without RECURRENCE-ID found");
+		// set event data from master VEVENT
+		fromVEvent(master);
+
+		// find and process exceptions
+		for (Object objEvent : events) {
+			VEvent event = (VEvent)objEvent;
+			if (event.getRecurrenceId() != null) {
+				Event exception = new Event(name, null);
+				exception.fromVEvent(event);
+				exceptions.add(exception);
+			}
+		}
+	}
+
+	protected void fromVEvent(VEvent event) throws InvalidResourceException {
 		if (event.getUid() != null)
 			uid = event.getUid().getValue();
 		else {
 			Log.w(TAG, "Received VEVENT without UID, generating new one");
 			generateUID();
 		}
-		
+		recurrenceId = event.getRecurrenceId();
+
 		if ((dtStart = event.getStartDate()) == null || (dtEnd = event.getEndDate()) == null)
 			throw new InvalidResourceException("Invalid start time/end time/duration");
 
@@ -165,7 +191,7 @@ public class Event extends Resource {
 			validateTimeZone(dtStart);
 			validateTimeZone(dtEnd);
 		}
-		
+
 		// all-day events and "events on that day":
 		// * related UNIX times must be in UTC
 		// * must have a duration (set to one day if missing)
@@ -176,26 +202,26 @@ public class Event extends Resource {
 			c.add(Calendar.DATE, 1);
 			dtEnd.setDate(new Date(c.getTimeInMillis()));
 		}
-		
+
 		rrule = (RRule)event.getProperty(Property.RRULE);
 		rdate = (RDate)event.getProperty(Property.RDATE);
 		exrule = (ExRule)event.getProperty(Property.EXRULE);
 		exdate = (ExDate)event.getProperty(Property.EXDATE);
-		
+
 		if (event.getSummary() != null)
 			summary = event.getSummary().getValue();
 		if (event.getLocation() != null)
 			location = event.getLocation().getValue();
 		if (event.getDescription() != null)
 			description = event.getDescription().getValue();
-		
+
 		status = event.getStatus();
-        opaque = event.getTransparency() != Transp.TRANSPARENT;
-		
+		opaque = event.getTransparency() != Transp.TRANSPARENT;
+
 		organizer = event.getOrganizer();
 		for (Object o : event.getProperties(Property.ATTENDEE))
 			attendees.add((Attendee)o);
-		
+
 		Clazz classification = event.getClassification();
 		if (classification != null) {
 			if (classification == Clazz.PUBLIC)
@@ -203,8 +229,15 @@ public class Event extends Resource {
 			else if (classification == Clazz.CONFIDENTIAL || classification == Clazz.PRIVATE)
 				forPublic = false;
 		}
-		
+
 		this.alarms = event.getAlarms();
+
+	}
+
+
+	@Override
+	public String getMimeType() {
+		return "text/calendar";
 	}
 
 	@Override
@@ -213,60 +246,39 @@ public class Event extends Resource {
 		net.fortuna.ical4j.model.Calendar ical = new net.fortuna.ical4j.model.Calendar();
 		ical.getProperties().add(Version.VERSION_2_0);
 		ical.getProperties().add(new ProdId("-//bitfire web engineering//DAVdroid " + Constants.APP_VERSION + " (ical4j 1.0.x)//EN"));
-		
-		VEvent event = new VEvent();
-		PropertyList props = event.getProperties();
-		
-		if (uid != null)
-			props.add(new Uid(uid));
-		
-		props.add(dtStart);
-		if (dtEnd != null)
-			props.add(dtEnd);
-		if (duration != null)
-			props.add(duration);
-		
-		if (rrule != null)
-			props.add(rrule);
-		if (rdate != null)
-			props.add(rdate);
-		if (exrule != null)
-			props.add(exrule);
-		if (exdate != null)
-			props.add(exdate);
-		
-		if (summary != null && !summary.isEmpty())
-			props.add(new Summary(summary));
-		if (location != null && !location.isEmpty())
-			props.add(new Location(location));
-		if (description != null && !description.isEmpty())
-			props.add(new Description(description));
-		
-		if (status != null)
-			props.add(status);
-		if (!opaque)
-			props.add(Transp.TRANSPARENT);
-		
-		if (organizer != null)
-			props.add(organizer);
-		props.addAll(attendees);
-		
-		if (forPublic != null)
-			event.getProperties().add(forPublic ? Clazz.PUBLIC : Clazz.PRIVATE);
-		
-		event.getAlarms().addAll(alarms);
-		
-		props.add(new LastModified());
-		ical.getComponents().add(event);
+
+		// "master event" (without exceptions)
+		ComponentList components = ical.getComponents();
+		VEvent master = toVEvent();
+		components.add(master);
+
+		// remember used time zones
+		Set<net.fortuna.ical4j.model.TimeZone> usedTimeZones = new HashSet<>();
+		if (dtStart != null && dtStart.getTimeZone() != null)
+			usedTimeZones.add(dtStart.getTimeZone());
+		if (dtEnd != null && dtEnd.getTimeZone() != null)
+			usedTimeZones.add(dtEnd.getTimeZone());
+
+		// recurrence exceptions
+		for (Event exception : exceptions) {
+			// create VEVENT for exception
+			VEvent vException = exception.toVEvent();
+
+			// set UID to UID of master event
+			vException.getProperties().add(master.getProperty(Property.UID));
+
+			components.add(vException);
+
+			// remember used time zones
+			if (exception.dtStart != null && exception.dtStart.getTimeZone() != null)
+				usedTimeZones.add(exception.dtStart.getTimeZone());
+			if (exception.dtEnd != null && exception.dtEnd.getTimeZone() != null)
+				usedTimeZones.add(exception.dtEnd.getTimeZone());
+		}
 
 		// add VTIMEZONE components
-		net.fortuna.ical4j.model.TimeZone
-			tzStart = (dtStart == null ? null : dtStart.getTimeZone()),
-			tzEnd = (dtEnd == null ? null : dtEnd.getTimeZone());
-		if (tzStart != null)
-			ical.getComponents().add(tzStart.getVTimeZone());
-		if (tzEnd != null && tzEnd != tzStart)
-			ical.getComponents().add(tzEnd.getVTimeZone());
+		for (net.fortuna.ical4j.model.TimeZone timeZone : usedTimeZones)
+			ical.getComponents().add(timeZone.getVTimeZone());
 
 		CalendarOutputter output = new CalendarOutputter(false);
 		ByteArrayOutputStream os = new ByteArrayOutputStream();
@@ -276,6 +288,55 @@ public class Event extends Resource {
 			Log.e(TAG, "Generated invalid iCalendar");
 		}
 		return os;
+	}
+
+	protected VEvent toVEvent() {
+		VEvent event = new VEvent();
+		PropertyList props = event.getProperties();
+
+		if (uid != null)
+			props.add(new Uid(uid));
+		if (recurrenceId != null)
+			props.add(recurrenceId);
+
+		props.add(dtStart);
+		if (dtEnd != null)
+			props.add(dtEnd);
+		if (duration != null)
+			props.add(duration);
+
+		if (rrule != null)
+			props.add(rrule);
+		if (rdate != null)
+			props.add(rdate);
+		if (exrule != null)
+			props.add(exrule);
+		if (exdate != null)
+			props.add(exdate);
+
+		if (summary != null && !summary.isEmpty())
+			props.add(new Summary(summary));
+		if (location != null && !location.isEmpty())
+			props.add(new Location(location));
+		if (description != null && !description.isEmpty())
+			props.add(new Description(description));
+
+		if (status != null)
+			props.add(status);
+		if (!opaque)
+			props.add(Transp.TRANSPARENT);
+
+		if (organizer != null)
+			props.add(organizer);
+		props.addAll(attendees);
+
+		if (forPublic != null)
+			event.getProperties().add(forPublic ? Clazz.PUBLIC : Clazz.PRIVATE);
+
+		event.getAlarms().addAll(alarms);
+
+		props.add(new LastModified());
+		return event;
 	}
 
 	
@@ -341,25 +402,16 @@ public class Event extends Resource {
 
 	/* guess matching Android timezone ID */
 	protected static void validateTimeZone(DateProperty date) {
-		if (date.isUtc() || !hasTime(date))
-			return;
-		
-		String tzID = getTzId(date);
-		if (tzID == null)
-			return;
-		
-		String localTZ = Time.TIMEZONE_UTC;
-		
-		String availableTZs[] = SimpleTimeZone.getAvailableIDs();
-		for (String availableTZ : availableTZs)
-			if (tzID.indexOf(availableTZ, 0) != -1) {
-				localTZ = availableTZ;
-				break;
-			}
-		
-		Log.d(TAG, "Assuming time zone " + localTZ + " for " + tzID);
-		date.setTimeZone(tzRegistry.getTimeZone(localTZ));
-	}
+        if (date.isUtc() || !hasTime(date))
+            return;
+
+        String tzID = getTzId(date);
+        if (tzID == null)
+            return;
+
+        String localTZ = DateUtils.findAndroidTimezoneID(tzID);
+        date.setTimeZone(tzRegistry.getTimeZone(localTZ));
+    }
 
 	public static String TimezoneDefToTzId(String timezoneDef) throws IllegalArgumentException {
 		try {
