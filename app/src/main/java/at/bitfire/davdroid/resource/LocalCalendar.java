@@ -121,7 +121,7 @@ public class LocalCalendar extends LocalCollection<Event> {
 	/* class methods, constructor */
 
 	@SuppressLint("InlinedApi")
-	public static void create(Account account, ContentResolver resolver, ServerInfo.ResourceInfo info) throws LocalStorageException {
+	public static Uri create(Account account, ContentResolver resolver, ServerInfo.ResourceInfo info) throws LocalStorageException {
 		final ContentProviderClient client = resolver.acquireContentProviderClient(CalendarContract.AUTHORITY);
 		if (client == null)
 			throw new LocalStorageException("No Calendar Provider found (Calendar app disabled?)");
@@ -166,8 +166,8 @@ public class LocalCalendar extends LocalCollection<Event> {
 		
 		Log.i(TAG, "Inserting calendar: " + values.toString() + " -> " + calendarsURI(account).toString());
 		try {
-			client.insert(calendarsURI(account), values);
-		} catch(RemoteException e) {
+			return client.insert(calendarsURI(account), values);
+		} catch (RemoteException e) {
 			throw new LocalStorageException(e);
 		}
 	}
@@ -342,7 +342,7 @@ public class LocalCalendar extends LocalCollection<Event> {
 		e.setLocation(values.getAsString(Events.EVENT_LOCATION));
 		e.setDescription(values.getAsString(Events.DESCRIPTION));
 
-		final boolean allDay = values.getAsBoolean(Events.ALL_DAY);
+		final boolean allDay = values.getAsInteger(Events.ALL_DAY) != 0;
 		final long tsStart = values.getAsLong(Events.DTSTART);
 		final String duration = values.getAsString(Events.DURATION);
 
@@ -404,7 +404,7 @@ public class LocalCalendar extends LocalCollection<Event> {
 		if (values.containsKey(Events.ORIGINAL_INSTANCE_TIME)) {
 			// this event is an exception of a recurring event
 			long originalInstanceTime = values.getAsLong(Events.ORIGINAL_INSTANCE_TIME);
-			boolean originalAllDay = values.getAsBoolean(Events.ORIGINAL_ALL_DAY);
+			boolean originalAllDay = values.getAsInteger(Events.ORIGINAL_ALL_DAY) != 0;
 			Date originalDate = originalAllDay ?
 					new Date(originalInstanceTime) :
 					new DateTime(originalInstanceTime);
@@ -430,7 +430,7 @@ public class LocalCalendar extends LocalCollection<Event> {
 		e.setOpaque(values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_FREE);
 
 		// set ORGANIZER only when there are attendees
-		if (values.getAsBoolean(Events.HAS_ATTENDEE_DATA) && values.containsKey(Events.ORGANIZER))
+		if (values.getAsInteger(Events.HAS_ATTENDEE_DATA) != 0 && values.containsKey(Events.ORGANIZER))
 			try {
 				e.setOrganizer(new Organizer(new URI("mailto", values.getAsString(Events.ORGANIZER), null)));
 			} catch (URISyntaxException ex) {
