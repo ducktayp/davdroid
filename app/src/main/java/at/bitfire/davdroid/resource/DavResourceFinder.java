@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
+ * Copyright © 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
@@ -9,6 +9,7 @@ package at.bitfire.davdroid.resource;
 
 import android.content.Context;
 import android.util.Log;
+import android.widget.Toast;
 
 import org.apache.http.HttpException;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -127,39 +128,56 @@ public class DavResourceFinder implements Closeable {
 				if (homeSetCalendars.getMembers() != null)
 					possibleCalendars.addAll(homeSetCalendars.getMembers());
 
-				List<ServerInfo.ResourceInfo> calendars = new LinkedList<>();
+				List<ServerInfo.ResourceInfo>
+						calendars = new LinkedList<>(),
+						todoLists = new LinkedList<>();
 				for (WebDavResource resource : possibleCalendars)
 					if (resource.isCalendar()) {
 						Log.i(TAG, "Found calendar: " + resource.getLocation().getPath());
-						if (resource.getSupportedComponents() != null) {
+						ServerInfo.ResourceInfo info = new ServerInfo.ResourceInfo(
+								ServerInfo.ResourceInfo.Type.CALENDAR,
+								resource.isReadOnly(),
+								resource.getLocation().toString(),
+								resource.getDisplayName(),
+								resource.getDescription(), resource.getColor()
+						);
+						info.setTimezone(resource.getTimezone());
+
+						boolean isCalendar = false,
+								isTodoList = false;
+						if (resource.getSupportedComponents() == null) {
+							// no info about supported components, assuming all components are supported
+							isCalendar = true;
+							isTodoList = true;
+						} else {
 							// CALDAV:supported-calendar-component-set available
-							boolean supportsEvents = false;
 							for (String supportedComponent : resource.getSupportedComponents())
-								if (supportedComponent.equalsIgnoreCase("VEVENT"))
-									supportsEvents = true;
-							if (!supportsEvents) {	// ignore collections without VEVENT support
-								Log.i(TAG, "Ignoring this calendar because of missing VEVENT support");
+								if ("VEVENT".equalsIgnoreCase(supportedComponent))
+									isCalendar = true;
+								else if ("VTODO".equalsIgnoreCase(supportedComponent))
+									isTodoList = true;
+
+							if (!isCalendar && !isTodoList) {
+								Log.i(TAG, "Ignoring this calendar because it supports neither VEVENT nor VTODO");
 								continue;
 							}
 						}
-						ServerInfo.ResourceInfo info = new ServerInfo.ResourceInfo(
-							ServerInfo.ResourceInfo.Type.CALENDAR,
-							resource.isReadOnly(),
-							resource.getLocation().toString(),
-							resource.getDisplayName(),
-							resource.getDescription(), resource.getColor()
-						);
-						info.setTimezone(resource.getTimezone());
-						calendars.add(info);
+
+						// use a copy constructor to allow different "enabled" status for calendars and todo lists
+						if (isCalendar)
+							calendars.add(new ServerInfo.ResourceInfo(info));
+						if (isTodoList)
+							todoLists.add(new ServerInfo.ResourceInfo(info));
 					}
+
 				serverInfo.setCalendars(calendars);
+				serverInfo.setTodoLists(todoLists);
 			} else
 				Log.w(TAG, "Found calendar home set, but it doesn't advertise CalDAV support");
 		}
 
 		if (!serverInfo.isCalDAV() && !serverInfo.isCardDAV())
 			throw new DavIncapableException(context.getString(R.string.setup_neither_caldav_nor_carddav));
-
 	}
 	
 	

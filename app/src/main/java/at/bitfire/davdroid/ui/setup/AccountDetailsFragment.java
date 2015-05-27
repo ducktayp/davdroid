@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
+ * Copyright © 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
@@ -16,6 +16,7 @@ import android.provider.CalendarContract;
 import android.provider.ContactsContract;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -26,16 +27,19 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.List;
+
 import at.bitfire.davdroid.Constants;
 import at.bitfire.davdroid.R;
 import at.bitfire.davdroid.resource.LocalCalendar;
 import at.bitfire.davdroid.resource.LocalStorageException;
+import at.bitfire.davdroid.resource.LocalTaskList;
 import at.bitfire.davdroid.resource.ServerInfo;
 import at.bitfire.davdroid.syncadapter.AccountSettings;
 
 public class AccountDetailsFragment extends Fragment implements TextWatcher {
-	public static final String KEY_SERVER_INFO = "server_info";
-	
+	public static final String TAG = "davdroid.AccountDetails";
+
 	ServerInfo serverInfo;
 	
 	EditText editAccountName;
@@ -45,7 +49,7 @@ public class AccountDetailsFragment extends Fragment implements TextWatcher {
 	public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
 		View v = inflater.inflate(R.layout.setup_account_details, container, false);
 		
-		serverInfo = (ServerInfo)getArguments().getSerializable(KEY_SERVER_INFO);
+		serverInfo = ((AddAccountActivity)getActivity()).serverInfo;
 		
 		editAccountName = (EditText)v.findViewById(R.id.account_name);
 		editAccountName.addTextChangedListener(this);
@@ -81,49 +85,59 @@ public class AccountDetailsFragment extends Fragment implements TextWatcher {
 	// actions
 	
 	void addAccount() {
-		ServerInfo serverInfo = (ServerInfo)getArguments().getSerializable(KEY_SERVER_INFO);
 		String accountName = editAccountName.getText().toString();
 		
 		AccountManager accountManager = AccountManager.get(getActivity());
 		Account account = new Account(accountName, Constants.ACCOUNT_TYPE);
 		Bundle userData = AccountSettings.createBundle(serverInfo);
-		
-		boolean syncContacts = false;
-		for (ServerInfo.ResourceInfo addressBook : serverInfo.getAddressBooks())
-			if (addressBook.isEnabled()) {
-				ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 1);
-				syncContacts = true;
-				continue;
-			}
-		if (syncContacts) {
-			ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 1);
-			ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, true);
-		} else
-			ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 0);
-		
+
 		if (accountManager.addAccountExplicitly(account, serverInfo.getPassword(), userData)) {
-			// account created, now create calendars
-			boolean syncCalendars = false;
-			for (ServerInfo.ResourceInfo calendar : serverInfo.getCalendars())
-				if (calendar.isEnabled())
-					try {
-						LocalCalendar.create(account, getActivity().getContentResolver(), calendar);
-						syncCalendars = true;
-					} catch (LocalStorageException e) {
-						Toast.makeText(getActivity(), "Couldn't create calendar(s): " + e.getMessage(), Toast.LENGTH_LONG).show();
-					}
-			if (syncCalendars) {
-				ContentResolver.setIsSyncable(account, CalendarContract.AUTHORITY, 1);
-				ContentResolver.setSyncAutomatically(account, CalendarContract.AUTHORITY, true);
-			} else
-				ContentResolver.setIsSyncable(account, CalendarContract.AUTHORITY, 0);
-			
+			addSync(account, ContactsContract.AUTHORITY, serverInfo.getAddressBooks(), null);
+
+			addSync(account, CalendarContract.AUTHORITY, serverInfo.getCalendars(), new AddSyncCallback() {
+				@Override
+				public void createLocalCollection(Account account, ServerInfo.ResourceInfo calendar) throws LocalStorageException {
+					LocalCalendar.create(account, getActivity().getContentResolver(), calendar);
+				}
+			});
+
+			addSync(account, LocalTaskList.TASKS_AUTHORITY, serverInfo.getTodoLists(), new AddSyncCallback() {
+				@Override
+				public void createLocalCollection(Account account, ServerInfo.ResourceInfo todoList) throws LocalStorageException {
+					LocalTaskList.create(account, getActivity().getContentResolver(), todoList);
+				}
+			});
+
 			getActivity().finish();				
 		} else
 			Toast.makeText(getActivity(), "Couldn't create account (account with this name already existing?)", Toast.LENGTH_LONG).show();
 	}
 
-	
+	protected interface AddSyncCallback {
+		void createLocalCollection(Account account, ServerInfo.ResourceInfo resource) throws LocalStorageException;
+	}
+
+	protected void addSync(Account account, String authority, List<ServerInfo.ResourceInfo> resourceList, AddSyncCallback callback) {
+		boolean sync = false;
+		for (ServerInfo.ResourceInfo resource : resourceList)
+			if (resource.isEnabled()) {
+				sync = true;
+				if (callback != null)
+					try {
+						callback.createLocalCollection(account, resource);
+					} catch(LocalStorageException e) {
+						Log.e(TAG, "Couldn't add sync collection", e);
+						Toast.makeText(getActivity(), "Couldn't set up synchronization for " + authority, Toast.LENGTH_LONG).show();
+					}
+			}
+		if (sync) {
+			ContentResolver.setIsSyncable(account, authority, 1);
+			ContentResolver.setSyncAutomatically(account, authority, true);
+		} else
+			ContentResolver.setIsSyncable(account, authority, 0);
+	}
+
+
 	// input validation
 	
 	@Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
+ * Copyright © 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
@@ -332,6 +332,18 @@ public class WebDavResource {
 		processMultiStatus(response);
 	}
 
+	public void report(String query) throws IOException, HttpException, DavException {
+		HttpReport report = new HttpReport(location, query);
+		report.setHeader("Depth", "1");
+
+		@Cleanup CloseableHttpResponse response = httpClient.execute(report, context);
+		if (response == null)
+			throw new DavNoContentException();
+
+		checkResponse(response);
+		processMultiStatus(response);
+	}
+
 	
 	/* resource operations */
 	
@@ -441,7 +453,7 @@ public class WebDavResource {
 		}
 
 		if (multiStatus.response == null)	// empty response
-			throw new DavNoContentException();
+			return;
 		
 		// member list will be built from response
 		List<WebDavResource> members = new LinkedList<WebDavResource>();

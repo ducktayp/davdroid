@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
+ * Copyright © 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
@@ -28,8 +28,7 @@ import at.bitfire.davdroid.webdav.TlsSniSocketFactory;
 
 public class CalendarsSyncAdapterService extends Service {
 	private static SyncAdapter syncAdapter;
-	
-	
+
 	@Override
 	public void onCreate() {
 		if (syncAdapter == null)
@@ -49,9 +48,8 @@ public class CalendarsSyncAdapterService extends Service {
 	
 
 	private static class SyncAdapter extends DavSyncAdapter {
-		private final static String TAG = "davdroid.CalendarsSyncAdapter";
+		private final static String TAG = "davdroid.CalendarsSync";
 
-		
 		private SyncAdapter(Context context) {
 			super(context);
 

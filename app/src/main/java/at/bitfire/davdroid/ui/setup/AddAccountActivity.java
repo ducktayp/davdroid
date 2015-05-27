@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 – 2015 Ricki Hirner (bitfire web engineering).
+ * Copyright © 2013 – 2015 Ricki Hirner (bitfire web engineering).
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the GNU Public License v3.0
  * which accompanies this distribution, and is available at
@@ -14,12 +14,17 @@ import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.View;
 
 import at.bitfire.davdroid.Constants;
 import at.bitfire.davdroid.R;
 import at.bitfire.davdroid.webdav.TlsSniSocketFactory;
+import at.bitfire.davdroid.resource.ServerInfo;
 
 public class AddAccountActivity extends Activity {
+
+	protected ServerInfo serverInfo;
+
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -40,6 +45,11 @@ public class AddAccountActivity extends Activity {
 		MenuInflater inflater = getMenuInflater();
 		inflater.inflate(R.menu.setup_add_account, menu);
 		return true;
+	}
+
+	public void installTasksApp(View view) {
+		final Intent intent = new Intent(Intent.ACTION_VIEW).setData(Uri.parse("market://details?id=org.dmfs.tasks"));
+		startActivity(intent);
 	}
 
 	public void showHelp(MenuItem item) {
