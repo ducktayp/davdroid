@@ -41,21 +41,17 @@ import android.provider.ContactsContract.RawContacts;
 import android.util.Log;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.WordUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 import at.bitfire.davdroid.syncadapter.AccountSettings;
@@ -64,7 +60,6 @@ import ezvcard.parameter.EmailType;
 import ezvcard.parameter.ImppType;
 import ezvcard.parameter.RelatedType;
 import ezvcard.parameter.TelephoneType;
-import ezvcard.parameter.VCardParameter;
 import ezvcard.property.Address;
 import ezvcard.property.Anniversary;
 import ezvcard.property.Birthday;
@@ -81,7 +76,7 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 	protected final static String COLUMN_UNKNOWN_PROPERTIES = RawContacts.SYNC3;
 
 	
-	protected AccountSettings accountSettings;
+	final protected AccountSettings accountSettings;
 	
 	
 	/* database fields */
@@ -138,26 +133,27 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 		return c;
 	}
 	
-	public void deleteAllExceptRemoteNames(Resource[] remoteResources) {
+	public int deleteAllExceptRemoteNames(Resource[] remoteResources) throws LocalStorageException {
 		String where;
 		
 		if (remoteResources.length != 0) {
-			List<String> sqlFileNames = new LinkedList<String>();
+			List<String> sqlFileNames = new LinkedList<>();
 			for (Resource res : remoteResources)
 				sqlFileNames.add(DatabaseUtils.sqlEscapeString(res.getName()));
 			where = entryColumnRemoteName() + " NOT IN (" + StringUtils.join(sqlFileNames, ",") + ")";
 		} else
 			where = entryColumnRemoteName() + " IS NOT NULL";
-			
-		Builder builder = ContentProviderOperation.newDelete(entriesURI()).withSelection(where, null);
-		pendingOperations.add(builder
-				.withYieldAllowed(true)
-				.build());
-	}
+
+        try {
+            return providerClient.delete(entriesURI(), where, null);
+        } catch (RemoteException e) {
+            throw new LocalStorageException("Couldn't delete contacts locally", e);
+        }
+    }
 	
 	@Override
-	public void commit() throws LocalStorageException {
-		super.commit();
+	public int commit() throws LocalStorageException {
+        int affected = super.commit();
 		
 		// update group details for groups we have just created
 		Uri groupsUri = syncAdapterURI(Groups.CONTENT_URI);
@@ -175,11 +171,13 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 					.withValue(Groups.TITLE, sourceID)
 					.withValue(Groups.GROUP_VISIBLE, 1)
 					.build());
-				super.commit();
+				affected += super.commit();
 			}
 		} catch (RemoteException e) {
 			throw new LocalStorageException("Couldn't update group names", e);
 		}
+
+        return affected;
 	}
 	
 	
@@ -472,19 +470,20 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 	protected void populatePostalAddress(Contact c, ContentValues row) {
 		Address address = new Address();
 		address.setLabel(row.getAsString(StructuredPostal.FORMATTED_ADDRESS));
-		switch (row.getAsInteger(StructuredPostal.TYPE)) {
-			case StructuredPostal.TYPE_HOME:
-				address.addType(AddressType.HOME);
-				break;
-			case StructuredPostal.TYPE_WORK:
-				address.addType(AddressType.WORK);
-				break;
-			case StructuredPostal.TYPE_CUSTOM:
-				String customType = row.getAsString(StructuredPostal.LABEL);
-				if (StringUtils.isNotEmpty(customType))
-					address.addType(AddressType.get(labelToXName(customType)));
-				break;
-		}
+		if (row.containsKey(StructuredPostal.TYPE))
+			switch (row.getAsInteger(StructuredPostal.TYPE)) {
+				case StructuredPostal.TYPE_HOME:
+					address.addType(AddressType.HOME);
+					break;
+				case StructuredPostal.TYPE_WORK:
+					address.addType(AddressType.WORK);
+					break;
+				case StructuredPostal.TYPE_CUSTOM:
+					String customType = row.getAsString(StructuredPostal.LABEL);
+					if (StringUtils.isNotEmpty(customType))
+						address.addType(AddressType.get(labelToXName(customType)));
+					break;
+			}
 		address.setStreetAddress(row.getAsString(StructuredPostal.STREET));
 		address.setPoBox(row.getAsString(StructuredPostal.POBOX));
 		address.setExtendedAddress(row.getAsString(StructuredPostal.NEIGHBORHOOD));
@@ -541,11 +540,11 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 			Log.d(TAG, "Group not found (maybe deleted)");
 	}
 	
-	protected void populateURL(Contact c, ContentValues row) throws RemoteException {
+	protected void populateURL(Contact c, ContentValues row) {
 		c.getURLs().add(row.getAsString(Website.URL));
 	}
 	
-	protected void populateEvent(Contact c, ContentValues row) throws RemoteException {
+	protected void populateEvent(Contact c, ContentValues row) {
 		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
 		try {
 			Date date = formatter.parse(row.getAsString(CommonDataKinds.Event.START_DATE));
@@ -562,13 +561,17 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 		}
 	}
 
-	protected void populateRelation(Contact c, ContentValues row) throws RemoteException {
+	protected void populateRelation(Contact c, ContentValues row) {
 		String name = row.getAsString(Relation.NAME);
+
+		// don't process empty relations
+		if (StringUtils.isEmpty(name))
+			return;
 
 		// find relation by name or create new one
 		Related related = null;
 		for (Related rel : c.getRelations()) {
-			if (rel.getText().equals(name)) {
+			if (name.equals(rel.getText())) {
 				related = rel;
 				break;
 			}
@@ -629,7 +632,7 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 		}
 	}
 	
-	protected void populateSipAddress(Contact c, ContentValues row) throws RemoteException {
+	protected void populateSipAddress(Contact c, ContentValues row) {
 		try {
 			Impp impp = new Impp("sip:" + row.getAsString(SipAddress.SIP_ADDRESS));
 			switch (row.getAsInteger(SipAddress.TYPE)) {
@@ -965,12 +968,12 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 			String	lineStreet = StringUtils.join(new String[] { address.getStreetAddress(), address.getPoBox(), address.getExtendedAddress() }, " "),
 					lineLocality = StringUtils.join(new String[] { address.getPostalCode(), address.getLocality() }, " ");
 			
-			List<String> lines = new LinkedList<String>();
-			if (lineStreet != null)
+			List<String> lines = new LinkedList<>();
+			if (StringUtils.isNotBlank(lineStreet))
 				lines.add(lineStreet);
 			if (address.getRegion() != null && !address.getRegion().isEmpty())
 				lines.add(address.getRegion());
-			if (lineLocality != null)
+			if (StringUtils.isNotBlank(lineLocality))
 				lines.add(lineLocality);
 			
 			formattedAddress = StringUtils.join(lines, "\n");
@@ -1031,7 +1034,7 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 	}
 
 	protected Builder buildRelated(Builder builder, RelatedType type, String name) {
-		int typeCode = 0;
+		int typeCode;
 		String typeLabel = null;
 		if (type == RelatedType.CHILD)
 			typeCode = Relation.TYPE_CHILD;
@@ -1083,7 +1086,7 @@ public class LocalAddressBook extends LocalCollection<Contact> {
 		String	lowerCase = StringUtils.lowerCase(xname, Locale.US),
 				withoutPrefix = StringUtils.removeStart(lowerCase, "x-"),
 				withSpaces = StringUtils.replace(withoutPrefix, "_", " ");
-		return WordUtils.capitalize(withSpaces);
+		return StringUtils.capitalize(withSpaces);
 	}
 
 }

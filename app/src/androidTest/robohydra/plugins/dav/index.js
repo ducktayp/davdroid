@@ -1,3 +1,5 @@
+// vim: ts=4:sw=4
+
 var roboHydraHeadDAV = require("../headdav");
 
 exports.getBodyParts = function(conf) {
@@ -5,6 +7,26 @@ exports.getBodyParts = function(conf) {
         heads: [
 			/* base URL, provide default DAV here */
 			new RoboHydraHeadDAV({ path: "/dav/" }),
+
+			/* test cookie:
+			 * POST /dav/testCookieStore   will cause the mock server to set a cookie
+			 * GET  /dav/testCookieStore   will cause the mock server to check the request cookie
+			 *                             and return 412 Precondition failed when it's not set correctly
+			 */
+			new RoboHydraHeadDAV({
+				path: "/dav/testCookieStore",
+				handler: function(req,res,next) {
+					var cookie = 'sess=MY_SESSION_12345';
+					if (req.method == "POST") {
+						res.statusCode = 200;
+						res.headers['Set-Cookie'] = cookie;
+						res.send("Setting cookie");
+					} else {
+						res.statusCode = (req.headers['cookie'] == cookie) ? 200 : 412;
+						res.send("Checking cookie");
+					}
+				}
+			}),
 
             /* multistatus parsing */
             new RoboHydraHeadDAV({
@@ -199,7 +221,7 @@ exports.getBodyParts = function(conf) {
 				}
             }),
 
-			/* non-existing file */
+			/* non-existing member */
             new RoboHydraHeadDAV({
 				path: "/dav/collection/new.file",
 				handler: function(req,res,next) {
@@ -216,13 +238,16 @@ exports.getBodyParts = function(conf) {
 				}
             }),
 
-			/* existing file */
+			/* existing member */
             new RoboHydraHeadDAV({
 				path: "/dav/collection/existing.file",
 				handler: function(req,res,next) {
 					if (req.method == "PUT") {
 						if (req.headers['if-none-match'])	/* requested "don't overwrite", but this file exists */
 							res.statusCode = 412;
+						else if (req.headers['if-match'] && req.queryParams && req.queryParams.conflict)
+							/* requested "don't overwrite", but this file exists with newer content */
+							res.statusCode = 409;
 						else {
 							res.statusCode = 204;
                             res.headers["ETag"] = "has-just-been-updated";
@@ -230,6 +255,15 @@ exports.getBodyParts = function(conf) {
 
 					} else if (req.method == "DELETE")
 						res.statusCode = 204;
+				}
+            }),
+
+			/* existing member with encoded URL as file name */
+            new RoboHydraHeadDAV({
+				path: "/dav/http%253A%252F%252Fwww.invalid.example%252Fm8%252Ffeeds%252Fcontacts%252Fmaria.mueller%252540gmail.com%252Fbase%252F5528abc5720cecc.vcf",
+				handler: function(req,res,next) {
+					if (req.method == "GET")
+						res.statusCode = 200;
 				}
             }),
 

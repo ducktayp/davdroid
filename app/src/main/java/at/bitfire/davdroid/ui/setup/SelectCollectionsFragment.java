@@ -53,7 +53,7 @@ public class SelectCollectionsFragment extends ListFragment {
 		
 		View header = getActivity().getLayoutInflater().inflate(R.layout.setup_select_collections_header, getListView(), false);
 		listView.addHeaderView(header, getListView(), false);
-		
+
 		final SelectCollectionsAdapter adapter = new SelectCollectionsAdapter(view.getContext(), serverInfo);
 		setListAdapter(adapter);
 		

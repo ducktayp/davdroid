@@ -14,7 +14,6 @@ import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
-import android.view.View;
 
 import at.bitfire.davdroid.Constants;
 import at.bitfire.davdroid.R;
@@ -22,15 +21,18 @@ import at.bitfire.davdroid.webdav.TlsSniSocketFactory;
 import at.bitfire.davdroid.resource.ServerInfo;
 
 public class AddAccountActivity extends Activity {
+	final private static String KEY_SERVER_INFO = "serverInfo";
 
 	protected ServerInfo serverInfo;
-
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 
 		TlsSniSocketFactory.setAndroidContext(getApplicationContext());
+		if (savedInstanceState != null)
+			serverInfo = (ServerInfo)savedInstanceState.getSerializable(KEY_SERVER_INFO);
+
 		setContentView(R.layout.setup_add_account);
 		
 		if (savedInstanceState == null) {	// first call
@@ -41,15 +43,16 @@ public class AddAccountActivity extends Activity {
 	}
 
 	@Override
+	protected void onSaveInstanceState(Bundle outState) {
+		super.onSaveInstanceState(outState);
+		outState.putSerializable(KEY_SERVER_INFO, serverInfo);
+	}
+
+	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
 		MenuInflater inflater = getMenuInflater();
 		inflater.inflate(R.menu.setup_add_account, menu);
 		return true;
-	}
-
-	public void installTasksApp(View view) {
-		final Intent intent = new Intent(Intent.ACTION_VIEW).setData(Uri.parse("market://details?id=org.dmfs.tasks"));
-		startActivity(intent);
 	}
 
 	public void showHelp(MenuItem item) {

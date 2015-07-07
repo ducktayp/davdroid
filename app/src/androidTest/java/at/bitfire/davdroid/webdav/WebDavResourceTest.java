@@ -13,8 +13,10 @@ import android.test.InstrumentationTestCase;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.impl.client.CloseableHttpClient;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 
 import javax.net.ssl.SSLPeerUnverifiedException;
@@ -28,9 +30,7 @@ import lombok.Cleanup;
 // tests require running robohydra!
 
 public class WebDavResourceTest extends InstrumentationTestCase {
-	static byte[] SAMPLE_CONTENT = new byte[] { 1, 2, 3, 4, 5 };
-	
-	final static String PATH_SIMPLE_FILE = "collection/new.file";
+	final static byte[] SAMPLE_CONTENT = new byte[] { 1, 2, 3, 4, 5 };
 	
 	AssetManager assetMgr;
 	CloseableHttpClient httpClient;
@@ -147,18 +147,24 @@ public class WebDavResourceTest extends InstrumentationTestCase {
 		};
 		
 		for (String path : requestPaths) {
-			WebDavResource davSlash = new WebDavResource(davCollection, path);
+			WebDavResource davSlash = new WebDavResource(davCollection, new URI(path));
 			davSlash.propfind(Mode.CARDDAV_COLLECTIONS);
 			assertEquals(new URI(principalOK), davSlash.getCurrentUserPrincipal());
 		}
 	}
+
+    public void testStrangeMemberNames() throws Exception {
+        // construct a WebDavResource from a base collection and a member which is an encoded URL (see https://github.com/bitfireAT/davdroid/issues/482)
+        WebDavResource dav = new WebDavResource(davCollection, "http%3A%2F%2Fwww.invalid.example%2Fm8%2Ffeeds%2Fcontacts%2Fmaria.mueller%2540gmail.com%2Fbase%2F5528abc5720cecc.vcf");
+        dav.get("text/vcard");
+    }
 	
 	
 	/* test normal HTTP/WebDAV */
 	
 	public void testPropfindRedirection() throws Exception {
 		// PROPFIND redirection
-		WebDavResource redirected = new WebDavResource(baseDAV, "/redirect/301?to=/dav/");
+		WebDavResource redirected = new WebDavResource(baseDAV, new URI("/redirect/301?to=/dav/"));
 		redirected.propfind(Mode.CURRENT_USER_PRINCIPAL);
 		assertEquals("/dav/", redirected.getLocation().getPath());
 	}
@@ -222,15 +228,23 @@ public class WebDavResourceTest extends InstrumentationTestCase {
 		}
 	}
 	
-	public void testPutUpdateDontOverwrite() throws Exception  {
+	public void testPutUpdateDontOverwrite() throws Exception {
 		// should succeed on an existing file
 		assertEquals("has-just-been-updated", davExistingFile.put(SAMPLE_CONTENT, PutMode.UPDATE_DONT_OVERWRITE));
 		
-		// should fail on a non-existing file
+		// should fail on a non-existing file (resource has been deleted on server, thus server returns 412)
 		try {
 			davNonExistingFile.put(SAMPLE_CONTENT, PutMode.UPDATE_DONT_OVERWRITE);
 			fail();
 		} catch(PreconditionFailedException ex) {
+		}
+
+		// should fail on existing file with wrong ETag (resource has changed on server, thus server returns 409)
+		try {
+			WebDavResource dav = new WebDavResource(davCollection, new URI("collection/existing.file?conflict=1"));
+			dav.put(SAMPLE_CONTENT, PutMode.UPDATE_DONT_OVERWRITE);
+			fail();
+		} catch(ConflictException ex) {
 		}
 	}
 	
