@@ -9,12 +9,16 @@ package at.bitfire.davdroid.resource;
 
 import android.util.Log;
 
+import org.apache.commons.codec.CharEncoding;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.entity.ContentType;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
@@ -52,8 +56,8 @@ import ezvcard.property.Telephone;
 import ezvcard.property.Title;
 import ezvcard.property.Uid;
 import ezvcard.property.Url;
+import lombok.Cleanup;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.ToString;
 
 
@@ -65,47 +69,51 @@ import lombok.ToString;
 public class Contact extends Resource {
 	private final static String TAG = "davdroid.Contact";
 
-	@Getter @Setter protected VCardVersion vCardVersion = VCardVersion.V3_0;
+	protected VCardVersion vCardVersion = VCardVersion.V3_0;
 
-	public final static String
+	public static final ContentType
+			MIME_VCARD3 = ContentType.create("text/vcard", CharEncoding.UTF_8),
+			MIME_VCARD4 = ContentType.parse("text/vcard; version=4.0");
+
+	public static final String
 		PROPERTY_STARRED = "X-DAVDROID-STARRED",
 		PROPERTY_PHONETIC_FIRST_NAME = "X-PHONETIC-FIRST-NAME",
 		PROPERTY_PHONETIC_MIDDLE_NAME = "X-PHONETIC-MIDDLE-NAME",
 		PROPERTY_PHONETIC_LAST_NAME = "X-PHONETIC-LAST-NAME",
 		PROPERTY_SIP = "X-SIP";
 		
-	public final static EmailType EMAIL_TYPE_MOBILE = EmailType.get("x-mobile");
+	public static final EmailType EMAIL_TYPE_MOBILE = EmailType.get("x-mobile");
 
-	public final static TelephoneType
+	public static final TelephoneType
 		PHONE_TYPE_CALLBACK = TelephoneType.get("x-callback"),
 		PHONE_TYPE_COMPANY_MAIN = TelephoneType.get("x-company_main"),
 		PHONE_TYPE_RADIO = TelephoneType.get("x-radio"),
 		PHONE_TYPE_ASSISTANT = TelephoneType.get("X-assistant"),
 		PHONE_TYPE_MMS = TelephoneType.get("x-mms");
-	public final static RelatedType
+	public static final RelatedType
 		RELATED_TYPE_BROTHER = RelatedType.get("brother"),
 		RELATED_TYPE_FATHER = RelatedType.get("father"),
 		RELATED_TYPE_MANAGER = RelatedType.get("manager"),
 		RELATED_TYPE_MOTHER = RelatedType.get("mother"),
 		RELATED_TYPE_REFERRED_BY = RelatedType.get("referred-by"),
 		RELATED_TYPE_SISTER = RelatedType.get("sister");
-	
-	@Getter @Setter private String unknownProperties;
-	
-	@Getter @Setter private boolean starred;
-	
-	@Getter @Setter private String displayName, nickName;
-	@Getter @Setter private String prefix, givenName, middleName, familyName, suffix;
-	@Getter @Setter private String phoneticGivenName, phoneticMiddleName, phoneticFamilyName;
-	@Getter @Setter private String note;
-	@Getter @Setter private Organization organization;
-	@Getter @Setter private String jobTitle, jobDescription;
-	
-	@Getter @Setter private byte[] photo;
-	
-	@Getter @Setter private Anniversary anniversary;
-	@Getter @Setter private Birthday birthDay;
 
+	protected String unknownProperties;
+	protected boolean starred;
+
+	protected String displayName, nickName;
+	protected String prefix, givenName, middleName, familyName, suffix;
+	protected String phoneticGivenName, phoneticMiddleName, phoneticFamilyName;
+	protected String note;
+	protected Organization organization;
+	protected String jobTitle, jobDescription;
+
+	protected byte[] photo;
+
+	protected Anniversary anniversary;
+	protected Birthday birthDay;
+
+	// lists must not be set to null (because they're iterated using "for"), so only getters are exposed
 	@Getter private List<Telephone> phoneNumbers = new LinkedList<>();
 	@Getter private List<Email> emails = new LinkedList<>();
 	@Getter private List<Impp> impps = new LinkedList<>();
@@ -140,8 +148,13 @@ public class Contact extends Resource {
 
 	@SuppressWarnings("LoopStatementThatDoesntLoop")
     @Override
-	public void parseEntity(InputStream is, AssetDownloader downloader) throws IOException {
-		VCard vcard = Ezvcard.parse(is).first();
+	public void parseEntity(InputStream is, Charset charset, AssetDownloader downloader) throws IOException {
+		final VCard vcard;
+		if (charset != null) {
+			@Cleanup InputStreamReader reader = new InputStreamReader(is, charset);
+			vcard = Ezvcard.parse(reader).first();
+		} else
+			vcard = Ezvcard.parse(is).first();
 		if (vcard == null)
 			return;
 		
@@ -318,11 +331,8 @@ public class Contact extends Resource {
 
 
 	@Override
-	public String getMimeType() {
-		if (vCardVersion == VCardVersion.V4_0)
-			return "text/vcard;version=4.0";
-		else
-			return "text/vcard";
+	public ContentType getContentType() {
+		return (vCardVersion == VCardVersion.V4_0) ? MIME_VCARD4 : MIME_VCARD3;
 	}
 	
 	@Override

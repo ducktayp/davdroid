@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
+import at.bitfire.davdroid.webdav.WebDavResource;
 import lombok.Cleanup;
 
 /**
@@ -74,9 +75,6 @@ public abstract class LocalCollection<T extends Resource> {
 	abstract protected String entryColumnUID();
 
 
-	/** ID of the collection (for instance, CalendarContract.Calendars._ID) */
-	// protected long id;
-
 	/** SQL filter expression */
 	String sqlFilter;
 	
@@ -91,10 +89,12 @@ public abstract class LocalCollection<T extends Resource> {
 	
 	/** gets the ID if the collection (for instance, ID of the Android calendar) */
 	abstract public long getId();
+	/** sets local stored CTag */
+	abstract public void setCTag(String cTag) throws LocalStorageException;
 	/** gets the CTag of the collection */
 	abstract public String getCTag() throws LocalStorageException;
-	/** sets the CTag of the collection */
-	abstract public void setCTag(String cTag) throws LocalStorageException;
+	/** update locally stored collection properties (e.g. display name and color) from a WebDavResource */
+	abstract public void updateMetaData(WebDavResource.Properties properties) throws LocalStorageException;
 
 	
 	// content provider (= database) querying
@@ -269,7 +269,9 @@ public abstract class LocalCollection<T extends Resource> {
 	 * @return the new resource object */
 	abstract public T newResource(long localID, String resourceName, String eTag);
 	
-	/** Enqueues adding the resource (including all data) to the local collection. */
+	/** Adds the resource (including all data) to the local collection.
+	 * @param resource   Resource to be added
+	 */
 	public void add(Resource resource) throws LocalStorageException {
 		int idx = pendingOperations.size();
 		pendingOperations.add(
@@ -281,8 +283,8 @@ public abstract class LocalCollection<T extends Resource> {
         commit();
 	}
 	
-	/** Enqueues updating an existing resource in the local collection. The resource will be found by 
-	 * the remote file name and all data will be updated. Requires commit(). */
+	/** Updates an existing resource in the local collection. The resource will be found by
+	 * the remote file name and all data will be updated. */
 	public void updateByRemoteName(Resource remoteResource) throws LocalStorageException {
 		T localResource = findByRemoteName(remoteResource.getName(), false);
 		pendingOperations.add(
@@ -296,7 +298,7 @@ public abstract class LocalCollection<T extends Resource> {
         commit();
 	}
 
-	/** Enqueues deleting a resource from the local collection. Requires commit(). */
+	/** Enqueues deleting a resource from the local collection. Requires commit() to be effective! */
 	public void delete(Resource resource) {
 		pendingOperations.add(ContentProviderOperation
 				.newDelete(ContentUris.withAppendedId(entriesURI(), resource.getLocalID()))
@@ -309,7 +311,8 @@ public abstract class LocalCollection<T extends Resource> {
 	 * @param remoteResources resources with these remote file names will be kept
      * @return number of deleted resources
 	 */
-	public int deleteAllExceptRemoteNames(Resource[] remoteResources) throws LocalStorageException {
+	public int deleteAllExceptRemoteNames(Resource[] remoteResources) throws LocalStorageException
+	{
 		final String where;
 
 		if (remoteResources.length != 0) {
@@ -323,12 +326,16 @@ public abstract class LocalCollection<T extends Resource> {
 			where = entryColumnRemoteName() + " IS NOT NULL";
 
         try {
-            return providerClient.delete(
-                    entriesURI(),
-                    // restrict deletion to parent collection
-                    entryColumnParentID() + "=? AND (" + where + ')',
-                    new String[] { String.valueOf(getId()) }
-            );
+	        if (entryColumnParentID() != null)
+		        // entries have a parent collection (for instance, events which have a calendar)
+	            return providerClient.delete(
+	                    entriesURI(),
+	                    entryColumnParentID() + "=? AND (" + where + ')',   // restrict deletion to parent collection
+	                    new String[] { String.valueOf(getId()) }
+	            );
+	        else
+	            // entries don't have a parent collection (contacts are stored directly and not within an address book)
+		        return providerClient.delete(entriesURI(), where, null);
         } catch (RemoteException e) {
             throw new LocalStorageException("Couldn't delete local resources", e);
         }
@@ -348,7 +355,7 @@ public abstract class LocalCollection<T extends Resource> {
 		}
 	}
 	
-	/** Enqueues removing the dirty flag from a locally-stored resource. Requires commit(). */
+	/** Enqueues removing the dirty flag from a locally-stored resource. Requires commit() to be effective! */
 	public void clearDirty(Resource resource) {
 		pendingOperations.add(ContentProviderOperation
 				.newUpdate(ContentUris.withAppendedId(entriesURI(), resource.getLocalID()))
@@ -364,9 +371,12 @@ public abstract class LocalCollection<T extends Resource> {
 				Log.d(TAG, "Committing " + pendingOperations.size() + " operations ...");
                 ContentProviderResult[] results = providerClient.applyBatch(pendingOperations);
                 for (ContentProviderResult result : results)
-                    if (result != null && result.count != null)
-                        affected += result.count;
-                Log.d(TAG, "... " + affected + " row(s) affected");
+                    if (result != null)                 // will have either .uri or .count set
+						if (result.count != null)
+                            affected += result.count;
+						else if (result.uri != null)
+							affected = 1;
+                Log.d(TAG, "... " + affected + " record(s) affected");
 				pendingOperations.clear();
 			} catch(OperationApplicationException | RemoteException ex) {
 				throw new LocalStorageException(ex);

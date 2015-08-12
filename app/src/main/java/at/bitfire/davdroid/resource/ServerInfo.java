@@ -13,7 +13,6 @@ import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
 
-import ezvcard.VCardVersion;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -56,10 +55,8 @@ public class ServerInfo implements Serializable {
 
 		final String URL,       // absolute URL of resource
 			  title,
-			  description,
-			  color;
-
-		VCardVersion vCardVersion;
+			  description;
+		final Integer color;
 
 		String timezone;
 
@@ -75,7 +72,6 @@ public class ServerInfo implements Serializable {
 			description = src.description;
 			color = src.color;
 
-			vCardVersion = src.vCardVersion;
 			timezone = src.timezone;
 		}
 

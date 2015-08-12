@@ -25,22 +25,16 @@ import android.test.InstrumentationTestCase;
 import android.util.Log;
 
 import net.fortuna.ical4j.model.Date;
-import net.fortuna.ical4j.model.DateList;
 import net.fortuna.ical4j.model.Dur;
 import net.fortuna.ical4j.model.TimeZone;
-import net.fortuna.ical4j.model.TimeZoneRegistry;
-import net.fortuna.ical4j.model.TimeZoneRegistryFactory;
 import net.fortuna.ical4j.model.component.VAlarm;
-import net.fortuna.ical4j.model.parameter.Value;
 import net.fortuna.ical4j.model.property.DtEnd;
 import net.fortuna.ical4j.model.property.DtStart;
-import net.fortuna.ical4j.model.property.RDate;
 
 import java.text.ParseException;
-import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.List;
 
+import at.bitfire.davdroid.DateUtils;
 import lombok.Cleanup;
 
 public class LocalCalendarTest extends InstrumentationTestCase {
@@ -133,8 +127,7 @@ public class LocalCalendarTest extends InstrumentationTestCase {
 	public void testBuildEntry() throws LocalStorageException, ParseException {
 		final String vcardName = "testBuildEntry";
 
-		TimeZoneRegistry tzRegistry = TimeZoneRegistryFactory.getInstance().createRegistry();
-		TimeZone tzVienna = tzRegistry.getTimeZone("Europe/Vienna");
+		final TimeZone tzVienna = DateUtils.tzRegistry.getTimeZone("Europe/Vienna");
 		assertNotNull(tzVienna);
 
 		// build and write event to calendar provider
@@ -157,15 +150,15 @@ public class LocalCalendarTest extends InstrumentationTestCase {
 		assertNotNull("Couldn't build and insert event", event);
 		// compare with original event
 		try {
-			assertEquals(event.getSummary(), event2.getSummary());
-			assertEquals(event.getDescription(), event2.getDescription());
-			assertEquals(event.getLocation(), event2.getLocation());
-			assertEquals(event.getDtStart(), event2.getDtStart());
+			assertEquals(event.summary, event2.summary);
+			assertEquals(event.description, event2.description);
+			assertEquals(event.location, event2.location);
+			assertEquals(event.dtStart, event2.dtStart);
 			assertFalse(event2.isAllDay());
 
 			assertEquals(1, event2.getAlarms().size());
 			VAlarm alarm = event2.getAlarms().get(0);
-			assertEquals(event.getSummary(), alarm.getDescription().getValue());  // should be built from event name
+			assertEquals(event.summary, alarm.getDescription().getValue());  // should be built from event name
 			assertEquals(new Dur(0, 0, -(24*60 + 60*2 + 3), 0), alarm.getTrigger().getDuration());   // calendar provider stores trigger in minutes
 		} finally {
 			testCalendar.delete(event);
@@ -191,10 +184,10 @@ public class LocalCalendarTest extends InstrumentationTestCase {
 		assertNotNull("Couldn't build and insert event", event);
 		// compare with original event
 		try {
-			assertEquals(event.getSummary(), event2.getSummary());
-			assertEquals(event.getDescription(), event2.getDescription());
-			assertEquals(event.getLocation(), event2.getLocation());
-			assertEquals(event.getDtStart(), event2.getDtStart());
+			assertEquals(event.summary, event2.summary);
+			assertEquals(event.description, event2.description);
+			assertEquals(event.location, event2.location);
+			assertEquals(event.dtStart, event2.dtStart);
 			assertTrue(event2.isAllDay());
 		} finally {
 			testCalendar.delete(event);
@@ -229,25 +222,6 @@ public class LocalCalendarTest extends InstrumentationTestCase {
 		} finally {
 			deleteEvent(id);
 		}
-	}
-
-	public void testRecurrenceSetsToAndroidString() throws ParseException {
-		final String tzId = "Europe/Vienna";
-
-		// one entry without time zone
-		final List<RDate> list = new ArrayList<>(2);
-		list.add(new RDate(new DateList("20150101T103000,20150102T103000", Value.DATE_TIME)));
-		assertEquals("20150101T103000,20150102T103000", LocalCalendar.recurrenceSetsToAndroidString(list));
-
-		// two entries with time zone
-		list.add(new RDate(new DateList("20150103T103000,20150104T103000", Value.DATE_TIME)));
-
-		final TimeZoneRegistry tzRegistry = TimeZoneRegistryFactory.getInstance().createRegistry();
-		final TimeZone tz = tzRegistry.getTimeZone(tzId);
-		for (RDate rdate : list)
-			rdate.setTimeZone(tz);
-
-		assertEquals(tzId + ";20150101T103000,20150102T103000,20150103T103000,20150104T103000", LocalCalendar.recurrenceSetsToAndroidString(list));
 	}
 
 }

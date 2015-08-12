@@ -39,6 +39,7 @@ import java.util.LinkedList;
 
 import at.bitfire.davdroid.DAVUtils;
 import at.bitfire.davdroid.DateUtils;
+import at.bitfire.davdroid.webdav.WebDavResource;
 import lombok.Cleanup;
 import lombok.Getter;
 
@@ -74,7 +75,7 @@ public class LocalTaskList extends LocalCollection<Task> {
 		values.put(TaskContract.TaskLists.ACCOUNT_TYPE, account.type);
 		values.put(TaskContract.TaskLists._SYNC_ID, info.getURL());
 		values.put(TaskContract.TaskLists.LIST_NAME, info.getTitle());
-		values.put(TaskContract.TaskLists.LIST_COLOR, DAVUtils.CalDAVtoARGBColor(info.getColor()));
+		values.put(TaskContract.TaskLists.LIST_COLOR, info.getColor() != null ? info.getColor() : DAVUtils.calendarGreen);
 		values.put(TaskContract.TaskLists.OWNER, account.name);
 		values.put(TaskContract.TaskLists.ACCESS_LEVEL, 0);
 		values.put(TaskContract.TaskLists.SYNC_ENABLED, 1);
@@ -90,7 +91,7 @@ public class LocalTaskList extends LocalCollection<Task> {
 
 	public static LocalTaskList[] findAll(Account account, ContentProviderClient providerClient) throws RemoteException {
 		@Cleanup Cursor cursor = providerClient.query(taskListsURI(account),
-				new String[] { TaskContract.TaskLists._ID, TaskContract.TaskLists._SYNC_ID },
+				new String[]{TaskContract.TaskLists._ID, TaskContract.TaskLists._SYNC_ID},
 				null, null, null);
 
 		LinkedList<LocalTaskList> taskList = new LinkedList<>();
@@ -126,6 +127,26 @@ public class LocalTaskList extends LocalCollection<Task> {
 		values.put(COLLECTION_COLUMN_CTAG, cTag);
 		try {
 			providerClient.update(ContentUris.withAppendedId(taskListsURI(account), id), values, null, null);
+		} catch(RemoteException e) {
+			throw new LocalStorageException(e);
+		}
+	}
+
+	@Override
+	public void updateMetaData(WebDavResource.Properties properties) throws LocalStorageException {
+		ContentValues values = new ContentValues();
+
+		final String displayName = properties.getDisplayName();
+		if (displayName != null)
+			values.put(TaskContract.TaskLists.LIST_NAME, displayName);
+
+		final Integer color = properties.getColor();
+		if (color != null)
+			values.put(TaskContract.TaskLists.LIST_COLOR, color);
+
+		try {
+			if (values.size() > 0)
+				providerClient.update(ContentUris.withAppendedId(taskListsURI(account), id), values, null, null);
 		} catch(RemoteException e) {
 			throw new LocalStorageException(e);
 		}
@@ -204,7 +225,7 @@ public class LocalTaskList extends LocalCollection<Task> {
 
 				TimeZone tz = null;
 				if (!cursor.isNull(8))
-					tz = DateUtils.getTimeZone(cursor.getString(8));
+					tz = DateUtils.tzRegistry.getTimeZone(cursor.getString(8));
 
 				if (!cursor.isNull(9) && !cursor.isNull(10)) {
 					long ts = cursor.getLong(9);
@@ -327,7 +348,7 @@ public class LocalTaskList extends LocalCollection<Task> {
 
 		// TZ *must* be provided when DTSTART or DUE is set
 		if ((task.getDtStart() != null || task.getDue() != null) && tz == null)
-			tz = DateUtils.getTimeZone(TimeZones.GMT_ID);
+			tz = DateUtils.tzRegistry.getTimeZone(TimeZones.GMT_ID);
 		if (tz != null)
 			builder.withValue(TaskContract.Tasks.TZ, DateUtils.findAndroidTimezoneID(tz.getID()));
 

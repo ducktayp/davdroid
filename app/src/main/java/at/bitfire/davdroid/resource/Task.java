@@ -10,13 +10,13 @@ package at.bitfire.davdroid.resource;
 
 import android.util.Log;
 
-import net.fortuna.ical4j.data.CalendarBuilder;
 import net.fortuna.ical4j.data.CalendarOutputter;
 import net.fortuna.ical4j.data.ParserException;
 import net.fortuna.ical4j.model.Component;
 import net.fortuna.ical4j.model.ComponentList;
 import net.fortuna.ical4j.model.DateTime;
 import net.fortuna.ical4j.model.PropertyList;
+import net.fortuna.ical4j.model.TimeZone;
 import net.fortuna.ical4j.model.ValidationException;
 import net.fortuna.ical4j.model.component.VToDo;
 import net.fortuna.ical4j.model.property.Clazz;
@@ -35,21 +35,23 @@ import net.fortuna.ical4j.model.property.Summary;
 import net.fortuna.ical4j.model.property.Uid;
 import net.fortuna.ical4j.model.property.Url;
 import net.fortuna.ical4j.model.property.Version;
-import net.fortuna.ical4j.util.SimpleHostInfo;
-import net.fortuna.ical4j.util.UidGenerator;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.Charset;
+import java.util.HashSet;
+import java.util.Set;
 
 import at.bitfire.davdroid.Constants;
-import at.bitfire.davdroid.syncadapter.DavSyncAdapter;
+import lombok.Cleanup;
 import lombok.Getter;
 import lombok.Setter;
 
-public class Task extends Resource {
+public class Task extends iCalendar {
 	private final static String TAG = "davdroid.Task";
 
 	@Getter @Setter DateTime createdAt;
@@ -76,20 +78,16 @@ public class Task extends Resource {
 		super(localId, name, ETag);
 	}
 
-	@Override
-	public void initialize() {
-		UidGenerator generator = new UidGenerator(new SimpleHostInfo(DavSyncAdapter.getAndroidID()), String.valueOf(android.os.Process.myPid()));
-		uid = generator.generateUid().getValue();
-		name = uid + ".ics";
-	}
-
 
 	@Override
-	public void parseEntity(InputStream entity, AssetDownloader downloader) throws IOException, InvalidResourceException {
-		net.fortuna.ical4j.model.Calendar ical;
+	public void parseEntity(InputStream entity, Charset charset, AssetDownloader downloader) throws IOException, InvalidResourceException {
+		final net.fortuna.ical4j.model.Calendar ical;
 		try {
-			CalendarBuilder builder = new CalendarBuilder();
-			ical = builder.build(entity);
+			if (charset != null) {
+				@Cleanup InputStreamReader reader = new InputStreamReader(entity, charset);
+				ical = calendarBuilder.build(reader);
+			} else
+				ical = calendarBuilder.build(entity);
 
 			if (ical == null)
 				throw new InvalidResourceException("No iCalendar found");
@@ -104,6 +102,10 @@ public class Task extends Resource {
 
 		if (todo.getUid() != null)
 			uid = todo.getUid().getValue();
+		else {
+			Log.w(TAG, "Received VTODO without UID, generating new one");
+			generateUID();
+		}
 
 		if (todo.getCreated() != null)
 			createdAt = todo.getCreated().getDateTime();
@@ -125,23 +127,24 @@ public class Task extends Resource {
 		if (todo.getStatus() != null)
 			status = todo.getStatus();
 
-		if (todo.getDue() != null)
+		if (todo.getDue() != null) {
 			due = todo.getDue();
+			validateTimeZone(due);
+		}
 		if (todo.getDuration() != null)
 			duration = todo.getDuration();
-		if (todo.getStartDate() != null)
+		if (todo.getStartDate() != null) {
 			dtStart = todo.getStartDate();
-		if (todo.getDateCompleted() != null)
+			validateTimeZone(dtStart);
+		}
+		if (todo.getDateCompleted() != null) {
 			completedAt = todo.getDateCompleted();
+			validateTimeZone(completedAt);
+		}
 		if (todo.getPercentComplete() != null)
 			percentComplete = todo.getPercentComplete().getPercentage();
 	}
 
-
-	@Override
-	public String getMimeType() {
-		return "text/calendar";
-	}
 
 	@Override
 	public ByteArrayOutputStream toEntity() throws IOException {
@@ -180,16 +183,32 @@ public class Task extends Resource {
 		if (status != null)
 			props.add(status);
 
-		if (due != null)
+		// remember used time zones
+		Set<TimeZone> usedTimeZones = new HashSet<>();
+
+		if (due != null) {
 			props.add(due);
+			if (due.getTimeZone() != null)
+				usedTimeZones.add(due.getTimeZone());
+		}
 		if (duration != null)
 			props.add(duration);
-		if (dtStart != null)
+		if (dtStart != null) {
 			props.add(dtStart);
-		if (completedAt != null)
+			if (dtStart.getTimeZone() != null)
+				usedTimeZones.add(dtStart.getTimeZone());
+		}
+		if (completedAt != null) {
 			props.add(completedAt);
+			if (completedAt.getTimeZone() != null)
+				usedTimeZones.add(completedAt.getTimeZone());
+		}
 		if (percentComplete != null)
 			props.add(new PercentComplete(percentComplete));
+
+		// add VTIMEZONE components
+		for (TimeZone timeZone : usedTimeZones)
+			ical.getComponents().add(timeZone.getVTimeZone());
 
 		CalendarOutputter output = new CalendarOutputter(false);
 		ByteArrayOutputStream os = new ByteArrayOutputStream();

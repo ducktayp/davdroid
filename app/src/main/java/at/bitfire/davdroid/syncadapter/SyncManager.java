@@ -19,13 +19,15 @@ import at.bitfire.davdroid.ArrayUtils;
 import at.bitfire.davdroid.resource.LocalCollection;
 import at.bitfire.davdroid.resource.LocalStorageException;
 import at.bitfire.davdroid.resource.RecordNotFoundException;
-import at.bitfire.davdroid.resource.RemoteCollection;
 import at.bitfire.davdroid.resource.Resource;
+import at.bitfire.davdroid.resource.WebDavCollection;
 import at.bitfire.davdroid.webdav.ConflictException;
 import at.bitfire.davdroid.webdav.DavException;
+import at.bitfire.davdroid.webdav.ForbiddenException;
 import at.bitfire.davdroid.webdav.HttpException;
 import at.bitfire.davdroid.webdav.NotFoundException;
 import at.bitfire.davdroid.webdav.PreconditionFailedException;
+import at.bitfire.davdroid.webdav.WebDavResource;
 
 public class SyncManager {
 	private static final String TAG = "davdroid.SyncManager";
@@ -33,41 +35,47 @@ public class SyncManager {
 	private static final int MAX_MULTIGET_RESOURCES = 35;
 	
 	final protected LocalCollection<? extends Resource> local;
-	final protected RemoteCollection<? extends Resource> remote;
+	final protected WebDavCollection<? extends Resource> remote;
 	
 	
-	public SyncManager(LocalCollection<? extends Resource> local, RemoteCollection<? extends Resource> remote) {
+	public SyncManager(LocalCollection<? extends Resource> local, WebDavCollection<? extends Resource> remote) {
 		this.local = local;
 		this.remote = remote;
 	}
 
 	
 	public void synchronize(boolean manualSync, SyncResult syncResult) throws URISyntaxException, LocalStorageException, IOException, HttpException, DavException {
-		// PHASE 1: push local changes to server
+		// PHASE 1: fetch collection properties
+		remote.getProperties();
+		final WebDavResource.Properties collectionProperties = remote.getCollection().getProperties();
+		local.updateMetaData(collectionProperties);
+
+		// PHASE 2: push local changes to server
 		int	deletedRemotely = pushDeleted(),
 			addedRemotely = pushNew(),
 			updatedRemotely = pushDirty();
-		
-		// PHASE 2A: check if there's a reason to do a sync with remote (= forced sync or remote CTag changed)
-		boolean fetchCollection = (deletedRemotely + addedRemotely + updatedRemotely) > 0;
+
+		// PHASE 3A: check if there's a reason to do a sync with remote (= forced sync or remote CTag changed)
+		boolean syncMembers = (deletedRemotely + addedRemotely + updatedRemotely) > 0;
 		if (manualSync) {
-			Log.i(TAG, "Synchronization forced");
-			fetchCollection = true;
+			Log.i(TAG, "Full synchronization forced");
+			syncMembers = true;
 		}
-		if (!fetchCollection) {
-			String	currentCTag = remote.getCTag(),
+		if (!syncMembers) {
+			final String
+					currentCTag = collectionProperties.getCTag(),
 					lastCTag = local.getCTag();
 			Log.d(TAG, "Last local CTag = " + lastCTag + "; current remote CTag = " + currentCTag);
 			if (currentCTag == null || !currentCTag.equals(lastCTag))
-				fetchCollection = true;
+				syncMembers = true;
 		}
 		
-		if (!fetchCollection) {
+		if (!syncMembers) {
 			Log.i(TAG, "No local changes and CTags match, no need to sync");
 			return;
 		}
 		
-		// PHASE 2B: detect details of remote changes
+		// PHASE 3B: detect details of remote changes
 		Log.i(TAG, "Fetching remote resource list");
 		Set<Resource>	remotelyAdded = new HashSet<>(),
 						remotelyUpdated = new HashSet<>();
@@ -83,18 +91,18 @@ public class SyncManager {
 			}
 		}
 
-		// PHASE 3: pull remote changes from server
+		// PHASE 4: pull remote changes from server
 		syncResult.stats.numInserts = pullNew(remotelyAdded.toArray(new Resource[remotelyAdded.size()]));
 		syncResult.stats.numUpdates = pullChanged(remotelyUpdated.toArray(new Resource[remotelyUpdated.size()]));
 
-		Log.i(TAG, "Removing non-dirty resources that are not present remotely anymore");
+		Log.i(TAG, "Removing entries that are not present remotely anymore (retaining " + remoteResources.length + " entries)");
 		syncResult.stats.numDeletes = local.deleteAllExceptRemoteNames(remoteResources);
 
         syncResult.stats.numEntries = syncResult.stats.numInserts + syncResult.stats.numUpdates + syncResult.stats.numDeletes;
 
 		// update collection CTag
 		Log.i(TAG, "Sync complete, fetching new CTag");
-		local.setCTag(remote.getCTag());
+		local.setCTag(collectionProperties.getCTag());
 	}
 	
 	
@@ -112,11 +120,10 @@ public class SyncManager {
 							remote.delete(res);
 						} catch(NotFoundException e) {
 							Log.i(TAG, "Locally-deleted resource has already been removed from server");
-						} catch(PreconditionFailedException e) {
+						} catch(PreconditionFailedException|ConflictException e) {
 							Log.i(TAG, "Locally-deleted resource has been changed on the server in the meanwhile");
 						}
-					
-					// always delete locally so that the record with the DELETED flag doesn't cause another deletion attempt
+
 					local.delete(res);
 					
 					count++;
@@ -142,7 +149,7 @@ public class SyncManager {
 						local.updateETag(res, eTag);
 					local.clearDirty(res);
 					count++;
-				} catch (PreconditionFailedException|ConflictException e) {
+				} catch (ConflictException|PreconditionFailedException e) {
                     Log.i(TAG, "Didn't overwrite existing resource with other content");
 				} catch (RecordNotFoundException e) {
 					Log.wtf(TAG, "Couldn't read new record", e);
@@ -166,8 +173,10 @@ public class SyncManager {
 						local.updateETag(res, eTag);
 					local.clearDirty(res);
 					count++;
-				} catch (PreconditionFailedException|ConflictException e) {
-                    Log.i(TAG, "Locally changed resource has been changed on the server in the meanwhile");
+				} catch (ForbiddenException e) {
+					Log.w(TAG, "Server has rejected local changes, server wins", e);
+				} catch (ConflictException|PreconditionFailedException e) {
+                    Log.i(TAG, "Locally changed resource has been changed on the server in the meanwhile", e);
 				} catch (RecordNotFoundException e) {
 					Log.e(TAG, "Couldn't read dirty record", e);
 				}

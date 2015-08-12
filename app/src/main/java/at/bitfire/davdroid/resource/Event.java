@@ -10,22 +10,17 @@ package at.bitfire.davdroid.resource;
 import android.text.format.Time;
 import android.util.Log;
 
-import net.fortuna.ical4j.data.CalendarBuilder;
 import net.fortuna.ical4j.data.CalendarOutputter;
 import net.fortuna.ical4j.data.ParserException;
 import net.fortuna.ical4j.model.Component;
 import net.fortuna.ical4j.model.ComponentList;
 import net.fortuna.ical4j.model.Date;
 import net.fortuna.ical4j.model.DateTime;
-import net.fortuna.ical4j.model.DefaultTimeZoneRegistryFactory;
 import net.fortuna.ical4j.model.Property;
 import net.fortuna.ical4j.model.PropertyList;
-import net.fortuna.ical4j.model.TimeZoneRegistry;
 import net.fortuna.ical4j.model.ValidationException;
 import net.fortuna.ical4j.model.component.VAlarm;
 import net.fortuna.ical4j.model.component.VEvent;
-import net.fortuna.ical4j.model.component.VTimeZone;
-import net.fortuna.ical4j.model.parameter.Value;
 import net.fortuna.ical4j.model.property.Attendee;
 import net.fortuna.ical4j.model.property.Clazz;
 import net.fortuna.ical4j.model.property.DateProperty;
@@ -35,7 +30,6 @@ import net.fortuna.ical4j.model.property.DtStart;
 import net.fortuna.ical4j.model.property.Duration;
 import net.fortuna.ical4j.model.property.ExDate;
 import net.fortuna.ical4j.model.property.ExRule;
-import net.fortuna.ical4j.model.property.LastModified;
 import net.fortuna.ical4j.model.property.Location;
 import net.fortuna.ical4j.model.property.Organizer;
 import net.fortuna.ical4j.model.property.RDate;
@@ -46,14 +40,13 @@ import net.fortuna.ical4j.model.property.Summary;
 import net.fortuna.ical4j.model.property.Transp;
 import net.fortuna.ical4j.model.property.Uid;
 import net.fortuna.ical4j.model.property.Version;
-import net.fortuna.ical4j.util.CompatibilityHints;
-import net.fortuna.ical4j.util.SimpleHostInfo;
-import net.fortuna.ical4j.util.UidGenerator;
+import net.fortuna.ical4j.util.TimeZones;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringReader;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.util.Calendar;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -63,49 +56,39 @@ import java.util.TimeZone;
 
 import at.bitfire.davdroid.Constants;
 import at.bitfire.davdroid.DateUtils;
-import at.bitfire.davdroid.syncadapter.DavSyncAdapter;
+import lombok.Cleanup;
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.Setter;
 
 
-public class Event extends Resource {
+public class Event extends iCalendar {
 	private final static String TAG = "davdroid.Event";
 	
-	private final static TimeZoneRegistry tzRegistry = new DefaultTimeZoneRegistryFactory().createRegistry();
+	protected RecurrenceId recurrenceId;
 
-	@Getter @Setter protected RecurrenceId recurrenceId;
+	protected String summary, location, description;
 
-	@Getter @Setter protected String summary, location, description;
+	protected DtStart dtStart;
+	protected DtEnd dtEnd;
+
+	// lists must not be set to null (because they're iterated using "for"), so only getters are exposed
+	protected Duration duration;
+	@Getter private List<RDate> rdates = new LinkedList<>();
+	protected RRule rrule;
+	@Getter private List<ExDate> exdates = new LinkedList<>();
+	protected ExRule exrule;
+	@Getter private List<Event> exceptions = new LinkedList<>();
+
+	protected Boolean forPublic;
+	protected Status status;
 	
-	@Getter protected DtStart dtStart;
-	@Getter protected DtEnd dtEnd;
-	@Getter @Setter protected Duration duration;
-	@Getter protected List<RDate> rdates = new LinkedList<>();
-	@Getter @Setter protected RRule rrule;
-	@Getter protected List<ExDate> exdates = new LinkedList<>();
-	@Getter @Setter protected ExRule exrule;
-	@Getter protected List<Event> exceptions = new LinkedList<>();
-
-	@Getter @Setter protected Boolean forPublic;
-	@Getter @Setter protected Status status;
+	protected boolean opaque;
 	
-	@Getter @Setter protected boolean opaque;
-	
-	@Getter @Setter protected Organizer organizer;
-	@Getter protected List<Attendee> attendees = new LinkedList<>();
+	protected Organizer organizer;
+	@Getter private List<Attendee> attendees = new LinkedList<>();
 
-	@Getter protected List<VAlarm> alarms = new LinkedList<>();
+	@Getter private List<VAlarm> alarms = new LinkedList<>();
 
-	static {
-		CompatibilityHints.setHintEnabled(CompatibilityHints.KEY_RELAXED_UNFOLDING, true);
-		CompatibilityHints.setHintEnabled(CompatibilityHints.KEY_RELAXED_PARSING, true);
-		CompatibilityHints.setHintEnabled(CompatibilityHints.KEY_OUTLOOK_COMPATIBILITY, true);
-
-		// disable automatic time-zone updates (causes unnecessary network traffic for most people)
-		System.setProperty("net.fortuna.ical4j.timezone.update.enabled", "false");
-	}
-	
 
 	public Event(String name, String ETag) {
 		super(name, ETag);
@@ -115,26 +98,17 @@ public class Event extends Resource {
 		super(localID, name, ETag);
 	}
 
-	
-	@Override
-	public void initialize() {
-		generateUID();
-		name = uid.replace("@", "_") + ".ics";
-	}
-	
-	protected void generateUID() {
-		UidGenerator generator = new UidGenerator(new SimpleHostInfo(DavSyncAdapter.getAndroidID()), String.valueOf(android.os.Process.myPid()));
-		uid = generator.generateUid().getValue();
-	}
-
 
 	@Override
 	@SuppressWarnings("unchecked")
-	public void parseEntity(@NonNull InputStream entity, AssetDownloader downloader) throws IOException, InvalidResourceException {
-		net.fortuna.ical4j.model.Calendar ical;
+	public void parseEntity(@NonNull InputStream entity, Charset charset, AssetDownloader downloader) throws IOException, InvalidResourceException {
+		final net.fortuna.ical4j.model.Calendar ical;
 		try {
-			CalendarBuilder builder = new CalendarBuilder();
-			ical = builder.build(entity);
+			if (charset != null) {
+				@Cleanup InputStreamReader reader = new InputStreamReader(entity, charset);
+				ical = calendarBuilder.build(reader);
+			} else
+				ical = calendarBuilder.build(entity);
 
 			if (ical == null)
 				throw new InvalidResourceException("No iCalendar found");
@@ -179,15 +153,13 @@ public class Event extends Resource {
 		if ((dtStart = event.getStartDate()) == null || (dtEnd = event.getEndDate()) == null)
 			throw new InvalidResourceException("Invalid start time/end time/duration");
 
-		if (hasTime(dtStart)) {
-			validateTimeZone(dtStart);
-			validateTimeZone(dtEnd);
-		}
+		validateTimeZone(dtStart);
+		validateTimeZone(dtEnd);
 
 		// all-day events and "events on that day":
 		// * related UNIX times must be in UTC
 		// * must have a duration (set to one day if missing)
-		if (!hasTime(dtStart) && !dtEnd.getDate().after(dtStart.getDate())) {
+		if (!isDateTime(dtStart) && !dtEnd.getDate().after(dtStart.getDate())) {
 			Log.i(TAG, "Repairing iCal: DTEND := DTSTART+1");
 			Calendar c = Calendar.getInstance(TimeZone.getTimeZone(Time.TIMEZONE_UTC));
 			c.setTime(dtStart.getDate());
@@ -228,12 +200,6 @@ public class Event extends Resource {
 
 	}
 
-
-	@Override
-	public String getMimeType() {
-		return "text/calendar";
-	}
-
 	@Override
 	@SuppressWarnings("unchecked")
 	public ByteArrayOutputStream toEntity() throws IOException {
@@ -243,7 +209,7 @@ public class Event extends Resource {
 
 		// "master event" (without exceptions)
 		ComponentList components = ical.getComponents();
-		VEvent master = toVEvent();
+		VEvent master = toVEvent(new Uid(uid));
 		components.add(master);
 
 		// remember used time zones
@@ -256,10 +222,7 @@ public class Event extends Resource {
 		// recurrence exceptions
 		for (Event exception : exceptions) {
 			// create VEVENT for exception
-			VEvent vException = exception.toVEvent();
-
-			// set UID to UID of master event
-			vException.getProperties().add(master.getProperty(Property.UID));
+			VEvent vException = exception.toVEvent(master.getUid());
 
 			components.add(vException);
 
@@ -284,12 +247,12 @@ public class Event extends Resource {
 		return os;
 	}
 
-	protected VEvent toVEvent() {
+	protected VEvent toVEvent(Uid uid) {
 		VEvent event = new VEvent();
 		PropertyList props = event.getProperties();
 
 		if (uid != null)
-			props.add(new Uid(uid));
+			props.add(uid);
 		if (recurrenceId != null)
 			props.add(recurrenceId);
 
@@ -328,12 +291,28 @@ public class Event extends Resource {
 			event.getProperties().add(forPublic ? Clazz.PUBLIC : Clazz.PRIVATE);
 
 		event.getAlarms().addAll(alarms);
-
-		props.add(new LastModified());
 		return event;
 	}
 
-	
+
+	// time helpers
+
+	/**
+	 * Returns the time-zone ID for a given date-time, or TIMEZONE_UTC for dates (without time).
+	 * TIMEZONE_UTC is also returned for DATE-TIMEs in UTC representation.
+	 * @param date  DateProperty (DATE or DATE-TIME) whose time-zone information is used
+	 */
+	protected static String getTzId(DateProperty date) {
+		if (isDateTime(date) && !date.isUtc() && date.getTimeZone() != null)
+			return date.getTimeZone().getID();
+		else
+			return TimeZones.UTC_ID;
+	}
+
+	public boolean isAllDay() {
+		return !isDateTime(dtStart);
+	}
+
 	public long getDtStartInMillis() {
 		return dtStart.getDate().getTime();
 	}
@@ -347,7 +326,7 @@ public class Event extends Resource {
 			dtStart = new DtStart(new Date(tsStart));
 		} else {
 			DateTime start = new DateTime(tsStart);
-			start.setTimeZone(tzRegistry.getTimeZone(tzID));
+			start.setTimeZone(DateUtils.tzRegistry.getTimeZone(tzID));
 			dtStart = new DtStart(start);
 		}
 	}
@@ -366,58 +345,9 @@ public class Event extends Resource {
 			dtEnd = new DtEnd(new Date(tsEnd));
 		} else {
 			DateTime end = new DateTime(tsEnd);
-			end.setTimeZone(tzRegistry.getTimeZone(tzID));
+			end.setTimeZone(DateUtils.tzRegistry.getTimeZone(tzID));
 			dtEnd = new DtEnd(end);
 		}
 	}
-	
-	
-	// helpers
-	
-	public boolean isAllDay() {
-		return !hasTime(dtStart);
-	}
 
-	protected static boolean hasTime(DateProperty date) {
-		return date.getDate() instanceof DateTime;
-	}
-
-	protected static String getTzId(DateProperty date) {
-		if (date.isUtc() || !hasTime(date))
-			return Time.TIMEZONE_UTC;
-		else if (date.getTimeZone() != null)
-			return date.getTimeZone().getID();
-		else if (date.getParameter(Value.TZID) != null)
-			return date.getParameter(Value.TZID).getValue();
-		
-		// fallback
-		return Time.TIMEZONE_UTC;
-	}
-
-	/* guess matching Android timezone ID */
-	protected static void validateTimeZone(DateProperty date) {
-        if (date.isUtc() || !hasTime(date))
-            return;
-
-        String tzID = getTzId(date);
-        if (tzID == null)
-            return;
-
-        String localTZ = DateUtils.findAndroidTimezoneID(tzID);
-        date.setTimeZone(tzRegistry.getTimeZone(localTZ));
-    }
-
-	public static String TimezoneDefToTzId(String timezoneDef) throws IllegalArgumentException {
-		try {
-			if (timezoneDef != null) {
-				CalendarBuilder builder = new CalendarBuilder();
-				net.fortuna.ical4j.model.Calendar cal = builder.build(new StringReader(timezoneDef));
-				VTimeZone timezone = (VTimeZone)cal.getComponent(VTimeZone.VTIMEZONE);
-				return timezone.getTimeZoneId().getValue();
-			}
-		} catch (Exception ex) {
-			Log.w(TAG, "Can't understand time zone definition, ignoring", ex);
-		}
-		throw new IllegalArgumentException();
-	}
 }

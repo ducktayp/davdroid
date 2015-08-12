@@ -10,6 +10,7 @@ package at.bitfire.davdroid.resource;
 import android.util.Log;
 
 import org.apache.commons.io.IOUtils;
+import org.apache.http.entity.ContentType;
 import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.ByteArrayInputStream;
@@ -18,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.Charset;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -39,7 +41,7 @@ import lombok.Getter;
  *
  * @param <T> Subtype of Resource that can be stored in the collection
  */
-public abstract class RemoteCollection<T extends Resource> {
+public abstract class WebDavCollection<T extends Resource> {
 	private static final String TAG = "davdroid.resource";
 
 	URI baseURI;
@@ -50,7 +52,7 @@ public abstract class RemoteCollection<T extends Resource> {
 
 	abstract protected T newResourceSkeleton(String name, String ETag);
 
-	public RemoteCollection(CloseableHttpClient httpClient, String baseURL, String user, String password, boolean preemptiveAuth) throws URISyntaxException {
+	public WebDavCollection(CloseableHttpClient httpClient, String baseURL, String user, String password, boolean preemptiveAuth) throws URISyntaxException {
 		baseURI = URIUtils.parseURI(baseURL, false);
 		collection = new WebDavResource(httpClient, baseURI, user, password, preemptiveAuth);
 	}
@@ -58,14 +60,8 @@ public abstract class RemoteCollection<T extends Resource> {
 	
 	/* collection operations */
 
-	public String getCTag() throws URISyntaxException, IOException, HttpException {
-		try {
-			if (collection.getCTag() == null && collection.getMembers() == null)    // not already fetched
-				collection.propfind(HttpPropfind.Mode.COLLECTION_CTAG);
-		} catch (DavException e) {
-			return null;
-		}
-		return collection.getCTag();
+	public void getProperties() throws URISyntaxException, IOException, HttpException, DavException {
+		collection.propfind(HttpPropfind.Mode.COLLECTION_PROPERTIES);
 	}
 
 
@@ -94,10 +90,9 @@ public abstract class RemoteCollection<T extends Resource> {
 		List<T> resources = new LinkedList<>();
 		if (collection.getMembers() != null)
 			for (WebDavResource member : collection.getMembers())
-				resources.add(newResourceSkeleton(member.getName(), member.getETag()));
+				resources.add(newResourceSkeleton(member.getName(), member.getProperties().getETag()));
 
 		return resources.toArray(new Resource[resources.size()]);
-
 	}
 
 
@@ -119,11 +114,11 @@ public abstract class RemoteCollection<T extends Resource> {
 				throw new DavNoContentException();
 
 			for (WebDavResource member : collection.getMembers()) {
-				T resource = newResourceSkeleton(member.getName(), member.getETag());
+				T resource = newResourceSkeleton(member.getName(), member.getProperties().getETag());
 				try {
 					if (member.getContent() != null) {
 						@Cleanup InputStream is = new ByteArrayInputStream(member.getContent());
-						resource.parseEntity(is, getDownloader());
+						resource.parseEntity(is, null, getDownloader());
 						foundResources.add(resource);
 					} else
 						Log.e(TAG, "Ignoring entity without content");
@@ -148,13 +143,17 @@ public abstract class RemoteCollection<T extends Resource> {
 
 		member.get(memberAcceptedMimeTypes());
 
-		byte[] data = member.getContent();
+		final byte[] data = member.getContent();
 		if (data == null)
 			throw new DavNoContentException();
 
 		@Cleanup InputStream is = new ByteArrayInputStream(data);
 		try {
-			resource.parseEntity(is, getDownloader());
+			Charset charset = null;
+			ContentType mime = member.getProperties().getContentType();
+			if (mime != null)
+				charset = mime.getCharset();
+			resource.parseEntity(is, charset, getDownloader());
 		} catch (VCardParseException e) {
 			throw new InvalidResourceException(e);
 		}
@@ -164,13 +163,13 @@ public abstract class RemoteCollection<T extends Resource> {
 	// returns ETag of the created resource, if returned by server
 	public String add(Resource res) throws URISyntaxException, IOException, HttpException {
 		WebDavResource member = new WebDavResource(collection, res.getName(), res.getETag());
-		member.setContentType(res.getMimeType());
+		member.getProperties().setContentType(res.getContentType());
 
 		@Cleanup ByteArrayOutputStream os = res.toEntity();
 		String eTag = member.put(os.toByteArray(), PutMode.ADD_DONT_OVERWRITE);
 
-		// after a successful upload, the collection has implicitely changed, too
-		collection.invalidateCTag();
+		// after a successful upload, the collection has implicitly changed, too
+		collection.getProperties().invalidateCTag();
 
 		return eTag;
 	}
@@ -179,19 +178,19 @@ public abstract class RemoteCollection<T extends Resource> {
 		WebDavResource member = new WebDavResource(collection, res.getName(), res.getETag());
 		member.delete();
 
-		collection.invalidateCTag();
+		collection.getProperties().invalidateCTag();
 	}
 
 	// returns ETag of the updated resource, if returned by server
 	public String update(Resource res) throws URISyntaxException, IOException, HttpException {
 		WebDavResource member = new WebDavResource(collection, res.getName(), res.getETag());
-		member.setContentType(res.getMimeType());
+		member.getProperties().setContentType(res.getContentType());
 
 		@Cleanup ByteArrayOutputStream os = res.toEntity();
 		String eTag = member.put(os.toByteArray(), PutMode.UPDATE_DONT_OVERWRITE);
 
 		// after a successful upload, the collection has implicitely changed, too
-		collection.invalidateCTag();
+		collection.getProperties().invalidateCTag();
 
 		return eTag;
 	}
@@ -206,16 +205,21 @@ public abstract class RemoteCollection<T extends Resource> {
                 if (!uri.isAbsolute())
                     throw new URISyntaxException(uri.toString(), "URI referenced from entity must be absolute");
 
-                if (uri.getScheme().equalsIgnoreCase(baseURI.getScheme()) &&
-                        uri.getAuthority().equalsIgnoreCase(baseURI.getAuthority())) {
-                    // resource is on same server, send Authorization
+	            // send credentials when asset has same URI authority as baseURI
+	            // we have to construct these helper URIs because
+	            // "https://server:443" is NOT equal to "https://server" otherwise
+	            URI     baseUriAuthority = new URI(baseURI.getScheme(), null, baseURI.getHost(), baseURI.getPort(), null, null, null),
+			            assetUriAuthority = new URI(uri.getScheme(), null, uri.getHost(), baseURI.getPort(), null, null, null);
+
+                if (baseUriAuthority.equals(assetUriAuthority)) {
+	                Log.d(TAG, "Asset is on same server, sending credentials");
                     WebDavResource file = new WebDavResource(collection, uri);
                     file.get("image/*");
                     return file.getContent();
-                } else {
-                    // resource is on an external server, don't send Authorization
+
+                } else
+	                // resource is on an external server, don't send credentials
                     return IOUtils.toByteArray(uri);
-                }
             }
         };
 	}
