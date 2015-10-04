@@ -56,7 +56,7 @@ public class AddAccountActivity extends Activity {
 	}
 
 	public void showHelp(MenuItem item) {
-		startActivityForResult(new Intent(Intent.ACTION_VIEW, Uri.parse(Constants.WEB_URL_HELP)), 0);
+		startActivityForResult(new Intent(Intent.ACTION_VIEW, Uri.parse(Constants.WEB_URL_HELP +  "&pk_kwd=add-account-activity")), 0);
 	}
 
 }
